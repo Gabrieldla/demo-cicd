@@ -246,3 +246,20 @@ Pero quedarme en el 22 tampoco era la respuesta: era la cómoda. El 24 es LTS y 
 Y le dejé a Dependabot un `ignore` para las líneas impares de Node, con el motivo escrito al lado, para no tener que volver a razonar esto cada vez.
 
 **Qué me llevo:** un pipeline en verde es una condición necesaria para mezclar, no una razón suficiente. Automatiza lo que se puede comprobar; el ciclo de vida de una dependencia no es una de esas cosas. La compuerta que falta ahí sigue siendo una persona leyendo el número de versión.
+
+### La actualización que empeoraba la seguridad
+
+De las ocho PR de Dependabot, la de `express` 4.22.3 → 5.3.0 es la que más me hizo pensar, y la frenó Trivy:
+
+```
+body-parser (package.json)  CVE-2026-111181  HIGH  fixed
+  Installed: 2.3.0     Fixed: 2.4.0, 1.20.9
+```
+
+`express@5.3.0` arrastra `body-parser@2.3.0`, con una vulnerabilidad alta **y parche disponible**. Fui a ver con qué me estaba comparando, y ahí estaba lo interesante: en `main`, con `express@4.22.3`, el árbol trae `body-parser@1.20.9`, que es exactamente la versión parcheada de la línea 1.x.
+
+Así que la actualización **me habría movido de una dependencia parcheada a una sin parchear**. Una versión mayor más nueva, un número más alto, y menos seguro. No es lo que uno espera al actualizar, y es precisamente el escenario para el que sirve tener la etapa 6 después de la 5: escanear la imagen **ya construida**, con el árbol de dependencias resuelto de verdad, en vez de confiar en que "lo nuevo está mejor".
+
+Lo que no hice, y me lo pensé: forzar `body-parser` 2.4.0 por debajo de express con un `overrides` de npm. Habría funcionado y me habría dejado en express 5 unos días antes, pero a cambio de mantener a mano una excepción dentro de un árbol que no controlo. No lo paga. Se queda en express 4 hasta que express 5 declare `body-parser` ^2.4.0.
+
+**Qué me llevo:** "actualizar" y "estar más seguro" no son la misma cosa, y la única forma de notar la diferencia es que algo mire el resultado final. Si el escaneo estuviera antes de construir, o si confiara en el número de versión, esto habría entrado sin que nadie dijera nada.
