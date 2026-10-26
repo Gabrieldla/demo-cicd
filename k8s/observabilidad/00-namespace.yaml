@@ -1,0 +1,7 @@
+# Observabilidad en su propio namespace, separada de la aplicación. Si STAGING se
+# cae o se borra, quiero que lo que me lo dice siga en pie: un sistema de alertas
+# que muere con lo que vigila no sirve de nada.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observabilidad

@@ -80,10 +80,13 @@ tests/
 scripts/
     smoke.sh            cinco comprobaciones rápidas contra un ambiente desplegado
     desplegar.sh        kubectl kustomize + reemplazo de imágenes + kubectl apply
+    desplegar-observabilidad.sh   Prometheus, Alertmanager y Grafana
+    provocar-errores.sh           tumba la base de STAGING para comprobar la alerta
 k8s/
     base/               Deployments, Services, ConfigMap y PVC
     overlays/dev/       namespace demo-dev
     overlays/staging/   namespace demo-staging, web por NodePort 30090, dos réplicas de api
+    observabilidad/     Prometheus, Alertmanager y Grafana en el clúster (Reto 3)
 observabilidad/         Prometheus y Grafana con un dashboard RED ya armado
 compose.yaml            la aplicación en su máquina, con perfil opcional de observabilidad
 .devcontainer/          para que todo arranque solo en GitHub Codespaces
