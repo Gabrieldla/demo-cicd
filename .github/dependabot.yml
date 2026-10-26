@@ -28,6 +28,17 @@ updates:
       interval: daily
     cooldown:
       default-days: 7
+    groups:
+      # eslint y @eslint/js van acoplados a proposito: el segundo publica las
+      # reglas que el nucleo consume, y sus mayores tienen que coincidir. En PR
+      # separadas, la de @eslint/js sola murio en "npm ci" con ERESOLVE antes de
+      # ejecutar una regla. La compuerta hizo su trabajo, pero el problema no era
+      # la actualizacion sino como se propuso: agrupadas, llegan juntas.
+      eslint:
+        patterns:
+          - eslint
+          - "@eslint/*"
+          - eslint-*
 
   - package-ecosystem: docker
     directories: ["/web", "/api", "/db"]
