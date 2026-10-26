@@ -1,0 +1,18 @@
+# Reglas del baseline scan de OWASP ZAP. Una línea por alerta aceptada, con su motivo.
+# Formato: <id de la regla>	<acción>	<comentario>
+#
+# 10015	IGNORE	Cache-Control ausente en /api: son respuestas JSON dinámicas que no deben
+#		cachearse; nginx no las sirve, las genera la API, y el navegador no las guarda.
+10015	IGNORE	(ver comentario arriba) respuestas JSON dinamicas de la API
+#
+# 10063	IGNORE	Permissions-Policy. La aplicacion no usa camara, microfono ni geolocalizacion,
+#		asi que la cabecera no cambia nada hoy. Queda anotada como mejora.
+10063	IGNORE	la app no usa APIs del navegador que esta cabecera restringe
+#
+# 10096	IGNORE	Timestamp Disclosure. ZAP marca numeros que parecen marcas de tiempo Unix
+#		dentro del JSON de los mensajes: son las fechas de publicacion, que son
+#		informacion publica del libro de visitas.
+10096	IGNORE	las fechas de los mensajes son informacion publica por diseno
+#
+# 10109	IGNORE	Modern Web Application. Es informativa: avisa de que la pagina usa JavaScript.
+10109	IGNORE	alerta informativa, no es un hallazgo
