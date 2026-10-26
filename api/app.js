@@ -50,7 +50,7 @@ export function crearApp({ pool, registro = new client.Registry() }) {
   app.get("/api/estadisticas", async (_req, res, next) => {
     try {
       const { rows } = await pool.query("SELECT COUNT(*) AS total FROM mensajes");
-      res.json({ total: rows[0].total }); // roto a propósito: COUNT(*) llega como texto
+      res.json({ total: Number(rows[0].total) });
     } catch (e) { next(e); }
   });
 
