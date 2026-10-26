@@ -1,5 +1,10 @@
 # STAGING: un ambiente persistente, con datos similares a producción, al que solo se llega con aprobación.
-# web se expone por NodePort 30080: en Rancher Desktop queda en http://localhost:30080
+# web se expone por NodePort 30090: en Rancher Desktop queda en http://localhost:30090
+# No es 30080, que es el que sugiere la plantilla, porque en mi Rancher Desktop ese
+# puerto ya lo tiene el sitio del LAB-02 (namespace "perfil"), que sigue corriendo y
+# es la evidencia de ese laboratorio. Dos NodePort iguales no caben en un clúster:
+# kubectl rechaza el Service con "provided port is already allocated". Mover un puerto
+# cuesta una línea; tirar el ambiente de otro laboratorio no se deshace.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
