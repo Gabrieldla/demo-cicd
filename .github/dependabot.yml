@@ -16,10 +16,10 @@ updates:
     schedule:
       interval: daily
     cooldown:
+      # Solo default-days. Los semver-*-days NO existen para github-actions, y
+      # Dependabot no se queja a medias: rechaza el archivo COMPLETO y deja de
+      # revisar los tres ecosistemas. Lo tuve dos dias asi sin enterarme.
       default-days: 7
-      semver-major-days: 14
-      semver-minor-days: 7
-      semver-patch-days: 3
     open-pull-requests-limit: 5
 
   - package-ecosystem: npm
