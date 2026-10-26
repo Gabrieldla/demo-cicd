@@ -2,13 +2,16 @@
 
 [![CI/CD](https://github.com/Gabrieldla/demo-cicd/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/Gabrieldla/demo-cicd/actions/workflows/ci-cd.yml)
 
-Ocho jobs encadenados con `needs`. `lint` y `sast` arrancan a la vez; si una etapa falla, las siguientes no corren.
+Ocho jobs encadenados con `needs`. Tres arrancan a la vez —`lint`, `sast` y `test-unit`— porque ninguno depende de los otros. Si una etapa falla, las que vienen detrás no corren.
 
 ```mermaid
 flowchart LR
-    L["1 lint"] --> TU["3 test-unit"] --> TI["4 test-integration"] --> P["5 package"]
-    S["2 sast"] --> P
-    P --> SEC["6 security"] --> DEV["7 deploy-dev<br/>k3d, efímero"] --> AP{"aprobación"} --> STG["8 deploy-staging<br/>mi Rancher Desktop"]
+    L["1 lint"]
+    S["2 sast"] --> P["5 package"] --> SEC["6 security"]
+    TU["3 test-unit"] --> TI["4 test-integration"]
+    SEC --> DEV["7 deploy-dev<br/>k3d, efímero"]
+    TI --> DEV
+    DEV --> AP{"aprobación"} --> STG["8 deploy-staging<br/>mi Rancher Desktop"]
     style L fill:#4ba3c7,stroke:#4ba3c7,color:#fff
     style S fill:#d9635f,stroke:#d9635f,color:#fff
     style TU fill:#4ba3c7,stroke:#4ba3c7,color:#fff
@@ -20,12 +23,14 @@ flowchart LR
     style STG fill:#1f2024,stroke:#1f2024,color:#fff
 ```
 
+`lint` cuelga solo porque nadie lo espera, y es deliberado: un error de estilo no invalida una prueba. Sigue siendo obligatorio para mezclar, pero ya no hace cola delante de nadie. Esto es el B6, y está explicado en la [bitácora](BITACORA.md).
+
 ## Qué hace cada etapa
 
 | # | Etapa | Herramienta | Qué revisa | Si falla | Corre en |
 |---|---|---|---|---|---|
 | 1 | `lint` | ESLint, HTMLHint, Hadolint | Estilo del JavaScript, del HTML y de los tres Dockerfiles | No se ejecuta ninguna prueba | PR y push |
-| 2 | `sast` | Semgrep, **TruffleHog** | Patrones peligrosos en el código y secretos en **todo** el historial de Git | No se empaqueta nada | PR y push |
+| 2 | `sast` | Semgrep, **TruffleHog** | Patrones peligrosos en el código y secretos en el historial de lo que se va a mezclar | No se empaqueta nada | PR y push |
 | 3 | `test-unit` | Vitest | La lógica de la API con un pool falso, y el sitio con jsdom | No se prueba la integración | PR y push |
 | 4 | `test-integration` | Vitest + Compose | La aplicación entera levantada, entrando por nginx | No se publica ninguna imagen | PR y push |
 | 5 | `package` | Buildx, GHCR | Construye y publica `web`, `api` y `db` con el tag del commit | No hay imagen que escanear | PR y push |
