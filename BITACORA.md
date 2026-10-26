@@ -188,3 +188,27 @@ STAGING fue lo último en funcionar, y llegar ahí me costó tres intentos con t
 3. **El puerto estaba ocupado.** `nodePort: 30080` lo tenía el sitio del LAB-02, que sigue corriendo en mi clúster desde hace veinticinco días. `kubectl` lo rechaza con `provided port is already allocated`. Moví STAGING a 30090 en vez de tirar el otro ambiente: mover un puerto cuesta una línea, y tirar la evidencia de otro laboratorio no se deshace.
 
 **Qué me llevo:** las tres fallaron en el único job que corre en mi máquina, y ninguna habría aparecido en un runner de GitHub. Un ambiente que solo existe en una laptop no está probado hasta que se despliega en esa laptop, y cada intento costaba una aprobación manual mía. Después del segundo fallo dejé de adivinar y corrí a mano la secuencia completa —`desplegar.sh`, los tres `rollout status`, `smoke.sh`— hasta verla en verde en local. Recién entonces volví a pedir la aprobación. Probar en el sitio sale más barato que probar en el pipeline.
+
+---
+
+## Hallazgo 8: tenía un archivo inválido en rojo desde el primer día
+
+Dependabot llevaba dos días configurado y **no había abierto un solo PR**, con cinco dependencias que tenían versión mayor nueva: `eslint` 9→10, `vitest` 2→5, `jsdom` 25→29, `globals` 15→17 y `express` 4→5.
+
+Mi primera explicación fue el `interval: weekly`: Dependabot elige un día de la semana y hasta que no cae, no revisa. Lo pasé a `daily` —razonándolo, porque el `cooldown` ya me protege de instalar algo recién publicado— y **seguía sin abrir nada**. Ahí dejé de suponer y me puse a buscar.
+
+Lo encontré en un sitio tonto: un check en un PR que solo tocaba archivos `.md`.
+
+```
+The property '#/updates/0/cooldown/semver-major-days' is not supported
+for the package ecosystem 'github-actions'.
+```
+
+Los `semver-*-days` solo valen para ecosistemas con semver de verdad, y las acciones de GitHub no lo son. Pero lo grave no es el error, son sus dos consecuencias:
+
+1. **Dependabot no se queja a medias: rechaza el archivo completo.** Un error en el bloque de `github-actions` dejó sin revisar también `npm` y `docker`, que tenían su `cooldown` bien puesto. Tres ecosistemas apagados por una línea.
+2. **El check que lo decía no era obligatorio.** Se llama `.github/dependabot.yml`, sale en los PR, y no está entre los diez checks que protegen `main`. Llevaba dos días en rojo mientras el resto salía en verde y yo seguía mezclando. Lo vi de casualidad.
+
+**Qué me llevo:** es la tercera vez en este laboratorio que me pasa lo mismo —la tubería sin `pipefail`, el Semgrep con 38 reglas, y ahora esto—, y por eso lo escribo como una sola lección: **tener la herramienta configurada no es tenerla funcionando, y un pipeline verde no demuestra que lo esté**. Las tres veces el sistema estaba dando señales; dos de ellas solo aparecieron cuando rompí algo a propósito, y la tercera estaba escrita en un check que nunca había abierto porque no me frenaba nada.
+
+Lo que yo hubiera querido es que fallara. Un check que avisa pero no bloquea acaba siendo decoración: si no frena, no se lee.
