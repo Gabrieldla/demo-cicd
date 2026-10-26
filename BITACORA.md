@@ -117,3 +117,28 @@ Son **−44 %**, bastante por encima del 25 % que pedía el criterio. Lo que má
 - `package` esperaba a `test-integration`, 35 segundos del camino crítico. Pero **publicar una imagen no es desplegarla**: si la integración falla, la compuerta de DEV lo frena igual, porque `deploy-dev` necesita a las dos. Lo único que se pierde en ese caso es una imagen publicada que nadie usa, y eso es más barato que 35 segundos en cada run.
 
 Las cachés (capas de Docker y base de datos de Trivy) ayudaron, pero el salto grande vino de dejar de hacer cola donde no hacía falta. La pregunta útil no es "¿cómo hago cada paso más rápido?", sino "¿qué está esperando a qué, y por qué?".
+
+---
+
+## Hallazgo 5: probé el escáner de secretos y descubrí qué *no* reporta
+
+Antes de dar por bueno el cambio de Gitleaks a TruffleHog quise comprobar que la etapa 2 frena de verdad, igual que hice con las otras cuatro. Armé un repositorio de prueba con cinco credenciales falsas: una llave de AWS, un webhook de Slack, un token personal de GitHub, una cadena de conexión de Postgres y la clave secreta de AWS.
+
+TruffleHog reportó **una sola**: la de Postgres.
+
+```
+Detector Type: Postgres        → reportada
+AWS, Slack, GitHub PAT         → silencio
+unverified_secrets: 1
+```
+
+No es un fallo del escáner, es `--results=verified,unknown` haciendo exactamente lo que le pedí, y vale la pena entender por qué:
+
+- Para AWS, Slack y GitHub, TruffleHog **preguntó al emisor** si la credencial existe. Los tres respondieron que no. Eso la clasifica como `unverified` —muerta, comprobado— y el filtro la descarta. Una llave revocada no es un incidente.
+- Para la de Postgres **no pudo preguntar**: el host `db.staging.interno` no resuelve. Sin respuesta no hay veredicto, así que cae en `unknown`, y `unknown` sí pasa el filtro.
+
+Lo importante es hacia dónde falla cuando no sabe: **reporta**. Si mañana el runner se queda sin salida a internet, la verificación empieza a dar error en todo y el escáner se vuelve más ruidoso, no más silencioso. Es el lado correcto para equivocarse.
+
+Y confirma lo que escribí al elegir la herramienta, que entonces era solo una intuición: si dejara `--results=verified` a secas, la credencial de Postgres —la única real de las cinco, la que apunta a mi propia base— **no se habría reportado**, porque TruffleHog no tiene forma de verificarla. El filtro por defecto habría dejado pasar justo la que importaba.
+
+**Qué me llevo:** un escáner de secretos no se configura, se calibra. Y la única forma de saber qué deja pasar es darle secretos de prueba y mirar cuáles no aparecen, porque los que no aparecen no dejan rastro en ningún log.
