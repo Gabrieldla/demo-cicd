@@ -16,3 +16,13 @@
 #
 # 10109	IGNORE	Modern Web Application. Es informativa: avisa de que la pagina usa JavaScript.
 10109	IGNORE	alerta informativa, no es un hallazgo
+#
+# 10049	IGNORE	Storable and Cacheable Content. Son el HTML, el CSS y el JavaScript del sitio:
+#		contenido estatico y publico que DEBE poder cachearse, que es justo para lo
+#		que sirve un servidor web. Las respuestas de /api no se cachean.
+10049	IGNORE	contenido estatico publico, cachearlo es el comportamiento correcto
+#
+# 10116	IGNORE	"ZAP is Out of Date". Habla de la version del propio escaner, no de la
+#		aplicacion. La imagen de ZAP va con version fija a proposito, para que el
+#		pipeline sea reproducible; se sube cuando yo decida, no cuando salga una nueva.
+10116	IGNORE	es la version del escaner, no un hallazgo de la aplicacion
