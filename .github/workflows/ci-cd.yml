@@ -20,6 +20,14 @@ on:
 permissions:
   contents: read
 
+# En un PR, cada push nuevo deja obsoleto al anterior: no tiene sentido seguir
+# construyendo tres imágenes de un commit que ya nadie va a mezclar. En main NO se
+# cancela: un run de main puede estar desplegando, y cortarlo a media faena deja el
+# ambiente en un estado que nadie pidió.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # El shell por defecto de Actions es "bash -e", SIN pipefail: en una tubería solo
 # cuenta el código de salida del ÚLTIMO comando. Por eso un paso como
 # "npm test | tee salida.txt" quedaba en verde aunque las pruebas fallaran, y la
@@ -337,6 +345,18 @@ jobs:
     name: 8. Deploy STAGING (con aprobación)
     needs: deploy-dev
     if: github.event_name != 'pull_request'
+    # Lo descubrí mezclando varios PR seguidos: se me apilaron SEIS runs esperando
+    # aprobación, uno por commit. Y eso no es solo ruido en la pestaña Actions: si
+    # las apruebo en el orden en que aparecen, el último despliegue que gana es el
+    # del commit más VIEJO. El pipeline me estaba ofreciendo desplegar hacia atrás.
+    #
+    # Con un grupo de concurrencia por ambiente, un commit nuevo cancela la
+    # aprobación pendiente del anterior: solo se puede aprobar lo último, que es lo
+    # único que tiene sentido desplegar. A diferencia del grupo del workflow, aquí
+    # sí cancelo, porque lo que se cancela es una espera, no un trabajo en curso.
+    concurrency:
+      group: ambiente-staging
+      cancel-in-progress: true
     # Corre en MI máquina: el clúster de STAGING es mi Rancher Desktop, y GitHub no
     # puede alcanzarlo desde fuera. Por eso hace falta un runner self-hosted.
     runs-on: self-hosted
