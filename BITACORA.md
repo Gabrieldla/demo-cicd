@@ -303,3 +303,24 @@ Y no es una hipótesis: me pasó mientras escribía esto. El [run 40383601188](h
 El arreglo del arreglo es meter el `run_id` en el grupo cuando no es un PR, así cada run de `main` es único y no hace cola detrás de nadie. Y lo que de verdad hacía falta —que un commit nuevo invalide la aprobación pendiente del anterior— ya estaba donde corresponde: en el grupo del **job** de STAGING, no en el del workflow.
 
 **Qué me llevo:** el hallazgo 9 lo encontré por casualidad, mirando una lista que me pareció desordenada. Este lo encontré porque fui a comprobar que mi arreglo hacía lo que yo creía, y no lo hacía del todo. Son dos formas distintas de encontrar un fallo, y la segunda es la que se puede repetir a propósito: **después de arreglar algo, mirar qué más cambió**. El primer `concurrency` resolvía el síntoma que había visto y creaba uno que no había visto, y las dos cosas estaban en las mismas cuatro líneas.
+
+---
+
+## Hallazgo 11: validé la carpeta antes de meterle lo que la rompía
+
+El script de observabilidad hace `kubectl apply -f k8s/observabilidad/`, que aplica **todos** los YAML de la carpeta. Lo validé en su momento y salió limpio.
+
+Después añadí a esa misma carpeta `api.yml` (las reglas de alerta de Prometheus) y `pruebas-alertas.yml` (sus pruebas). Ninguno de los dos es un manifiesto de Kubernetes, y no volví a validar.
+
+Lo descubrió el script al correrlo de verdad:
+
+```
+error validating "k8s\observabilidad\api.yml": apiVersion not set, kind not set
+error validating "k8s\observabilidad\pruebas-alertas.yml": apiVersion not set, kind not set
+```
+
+Y no fue solo un mensaje feo. El script lleva `set -e`, así que **abortó ahí**: creó los Deployments pero nunca llegó a crear los ConfigMaps de las reglas y del dashboard. Prometheus y Grafana se quedaron en `ContainerCreating` esperando un volumen que no existía. Un despliegue a medias, que es peor que uno que falla del todo, porque parece que algo pasó.
+
+El arreglo es mover los dos archivos a `reglas/`: `kubectl apply -f carpeta/` **no es recursivo**, así que un subdirectorio queda fuera por construcción, sin depender de que nadie se acuerde.
+
+**Qué me llevo:** `kubectl apply -f <carpeta>` no aplica los archivos que yo tenía en la cabeza, aplica los que hay. Mi validación fue correcta el día que la hice y dejó de serlo en cuanto cambié la carpeta, sin que nada me avisara. Es el mismo patrón de los hallazgos 1, 2 y 8 con otra cara: **una comprobación hecha una vez no es una comprobación**, es una foto. Por eso las pruebas de la regla de alerta están en el pipeline y no en mi terminal.
