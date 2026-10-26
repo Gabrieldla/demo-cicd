@@ -1,0 +1,30 @@
+# Fijar las acciones por SHA las vuelve inmutables, pero también las congela: si una
+# publica un parche de seguridad, nadie se entera. Dependabot abre un PR con el SHA
+# nuevo. El cooldown evita saltar a una versión recién publicada, que es justo el
+# escenario del ataque a tj-actions/changed-files en 2025.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 3
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directories: ["/", "/api"]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: docker
+    directories: ["/web", "/api", "/db"]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

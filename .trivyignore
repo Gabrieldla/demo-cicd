@@ -1,7 +1,49 @@
 # Vulnerabilidades aceptadas, con el porqué. Cada línea es una decisión documentada, no un atajo.
 #
-# CVE-2025-68121: crypto/tls en el binario gosu que trae la imagen oficial de Postgres (postgres:16-alpine).
-# gosu solo se usa al arrancar el contenedor, para pasar de root al usuario postgres. No abre conexiones TLS,
-# así que la falla (validación de certificados al reanudar sesiones TLS) no es explotable en este uso.
-# Se vuelve a revisar cuando la imagen oficial actualice gosu. Aceptada el 09/10/2026.
+# ── Lo que NO se acepta ────────────────────────────────────────────────────────
+# Las vulnerabilidades CRITICAL y HIGH con parche en los paquetes del sistema se
+# corrigen, no se ignoran: los tres Dockerfiles hacen `apk upgrade --no-cache`, y
+# la imagen de la API además elimina npm, que solo hace falta para instalar.
+# Con eso, web y api quedan en cero hallazgos.
+#
+# ── gosu, en la imagen de la base de datos (26 CVE) ────────────────────────────
+# Todas son de la biblioteca estándar de Go con la que se compiló el binario gosu
+# que trae la imagen oficial postgres:16-alpine. No son de Postgres.
+#
+# gosu se ejecuta UNA vez, al arrancar el contenedor, para pasar de root al usuario
+# postgres, y después desaparece. No abre sockets, no habla TLS, no procesa entrada
+# de la red ni archivos del usuario: las fallas son de net/http, crypto/tls, archive
+# y encoding, rutas que este uso nunca toca.
+#
+# Alternativa que evalué: borrar gosu y hacer que el contenedor arranque directamente
+# como el usuario postgres (uid 70), que es lo que hice en el LAB-02. Aquí lo descarté
+# por ahora porque el Deployment de la plantilla corre como root y cambiarlo exige
+# además ajustar fsGroup y los permisos del volumen; queda anotado como mejora.
+#
+# Se revisan cuando la imagen oficial actualice gosu. Aceptadas el 25/10/2026.
+CVE-2025-61726
+CVE-2025-61729
 CVE-2025-68121
+CVE-2026-111943
+CVE-2026-25679
+CVE-2026-27145
+CVE-2026-32280
+CVE-2026-32281
+CVE-2026-32283
+CVE-2026-33811
+CVE-2026-33814
+CVE-2026-33818
+CVE-2026-39820
+CVE-2026-39821
+CVE-2026-39822
+CVE-2026-39836
+CVE-2026-42499
+CVE-2026-42504
+CVE-2026-56853
+CVE-2026-56858
+CVE-2026-56859
+CVE-2026-56860
+CVE-2026-56862
+CVE-2026-78667
+CVE-2026-78669
+CVE-2026-97031
