@@ -207,7 +207,7 @@ for the package ecosystem 'github-actions'.
 Los `semver-*-days` solo valen para ecosistemas con semver de verdad, y las acciones de GitHub no lo son. Pero lo grave no es el error, son sus dos consecuencias:
 
 1. **Dependabot no se queja a medias: rechaza el archivo completo.** Un error en el bloque de `github-actions` dejó sin revisar también `npm` y `docker`, que tenían su `cooldown` bien puesto. Tres ecosistemas apagados por una línea.
-2. **El check que lo decía no era obligatorio.** Se llama `.github/dependabot.yml`, sale en los PR, y no está entre los diez checks que protegen `main`. Llevaba dos días en rojo mientras el resto salía en verde y yo seguía mezclando. Lo vi de casualidad.
+2. **El check que lo decía no era obligatorio.** Se llama `.github/dependabot.yml`, sale en los PR, y **no estaba** entre los diez checks que protegen `main`. Llevaba dos días en rojo mientras el resto salía en verde y yo seguía mezclando. Lo vi de casualidad. Ahora es el undécimo check obligatorio, que es la única forma de que esto no me vuelva a pasar.
 
 **Qué me llevo:** es la tercera vez en este laboratorio que me pasa lo mismo —la tubería sin `pipefail`, el Semgrep con 38 reglas, y ahora esto—, y por eso lo escribo como una sola lección: **tener la herramienta configurada no es tenerla funcionando, y un pipeline verde no demuestra que lo esté**. Las tres veces el sistema estaba dando señales; dos de ellas solo aparecieron cuando rompí algo a propósito, y la tercera estaba escrita en un check que nunca había abierto porque no me frenaba nada.
 

@@ -40,7 +40,7 @@ flowchart LR
 
 ## Las dos compuertas
 
-**Técnica:** de `lint` a `deploy-dev` todo es automático, y cualquier fallo detiene la cadena. `main` está protegida con diez checks obligatorios, así que un PR en rojo no se puede mezclar.
+**Técnica:** de `lint` a `deploy-dev` todo es automático, y cualquier fallo detiene la cadena. `main` está protegida con **once** checks obligatorios, así que un PR en rojo no se puede mezclar. Uno de ellos valida el `dependabot.yml`: no es una etapa del pipeline, pero si ese archivo es inválido Dependabot deja de revisar y nadie se entera.
 
 **Humana:** `deploy-staging` usa el environment `staging`, que tiene *Required reviewers*. El job se queda esperando hasta que una persona aprueba. Eso es **Continuous Delivery**: para convertirlo en Continuous Deployment bastaría con quitar esa regla, sin tocar una línea del workflow.
 

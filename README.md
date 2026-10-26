@@ -41,7 +41,7 @@ flowchart LR
 | 7 | `deploy-dev` | **k3d**, OWASP ZAP | Despliega en un clúster efímero, corre smoke e integración contra él y lo ataca con ZAP | No se pide aprobación | solo push a `main` |
 | 8 | `deploy-staging` | runner propio | Despliega en mi Rancher Desktop, en http://localhost:30090 | STAGING se queda como estaba | push a `main`, **tras aprobación** |
 
-Hay dos compuertas. La **técnica**: `main` está protegida con diez checks obligatorios, así que un PR en rojo no se puede mezclar. Y la **humana**: `deploy-staging` usa el environment `staging` con *Required reviewers*, y el job espera hasta que apruebo. Eso es Continuous **Delivery**; para convertirlo en Continuous Deployment bastaría quitar esa regla, sin tocar el workflow.
+Hay dos compuertas. La **técnica**: `main` está protegida con **once** checks obligatorios, así que un PR en rojo no se puede mezclar. El undécimo es el que valida el propio `dependabot.yml`, y lo agregué después de tenerlo dos días en rojo sin enterarme —está contado en la [bitácora](BITACORA.md). Y la **humana**: `deploy-staging` usa el environment `staging` con *Required reviewers*, y el job espera hasta que apruebo. Eso es Continuous **Delivery**; para convertirlo en Continuous Deployment bastaría quitar esa regla, sin tocar el workflow.
 
 > 📄 **[Más detalle en PIPELINE.md →](./PIPELINE.md)**: por qué se construye una sola vez, las herramientas que cambié y cómo se tratan las vulnerabilidades.
 > 📓 **[Bitácora de decisiones →](./BITACORA.md)**: los siete hallazgos, lo que no funcionó y por qué.
