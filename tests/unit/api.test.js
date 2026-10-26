@@ -81,3 +81,20 @@ describe("GET /metrics", () => {
     expect(r.text).toContain("http_request_duration_seconds");
   });
 });
+
+describe("GET /api/estadisticas", () => {
+  it("devuelve el total de mensajes como número", async () => {
+    // COUNT(*) llega como texto desde Postgres: la API tiene que convertirlo.
+    const query = vi.fn().mockResolvedValue({ rows: [{ total: "42" }] });
+    const r = await request(appConPool(query)).get("/api/estadisticas");
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ total: 42 });
+    expect(typeof r.body.total).toBe("number");
+  });
+
+  it("responde 500 si la base de datos falla", async () => {
+    const app = appConPool(vi.fn().mockRejectedValue(new Error("sin conexión")));
+    const r = await request(app).get("/api/estadisticas");
+    expect(r.status).toBe(500);
+  });
+});

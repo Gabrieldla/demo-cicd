@@ -41,3 +41,22 @@ describe(`la aplicación en ${BASE}`, () => {
     expect(r.status).toBe(404);
   });
 });
+
+describe("GET /api/estadisticas", () => {
+  it("el total crece cuando se publica un mensaje", async () => {
+    // Prueba de integración de verdad: cuenta, publica y vuelve a contar contra la
+    // aplicación levantada. Si la cuenta no sube, algo entre la API y Postgres falla.
+    const antes = await fetch(`${BASE}/api/estadisticas`).then((r) => r.json());
+    expect(typeof antes.total).toBe("number");
+
+    const r = await fetch(`${BASE}/api/mensajes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nombre: "Estadísticas", mensaje: `conteo ${Date.now()}` }),
+    });
+    expect(r.status).toBe(201);
+
+    const despues = await fetch(`${BASE}/api/estadisticas`).then((r) => r.json());
+    expect(despues.total).toBe(antes.total + 1);
+  });
+});
