@@ -44,7 +44,7 @@ flowchart LR
 Hay dos compuertas. La **técnica**: `main` está protegida con diez checks obligatorios, así que un PR en rojo no se puede mezclar. Y la **humana**: `deploy-staging` usa el environment `staging` con *Required reviewers*, y el job espera hasta que apruebo. Eso es Continuous **Delivery**; para convertirlo en Continuous Deployment bastaría quitar esa regla, sin tocar el workflow.
 
 > 📄 **[Más detalle en PIPELINE.md →](./PIPELINE.md)**: por qué se construye una sola vez, las herramientas que cambié y cómo se tratan las vulnerabilidades.
-> 📓 **[Bitácora de decisiones →](./BITACORA.md)**: los nueve hallazgos, lo que no funcionó y por qué.
+> 📓 **[Bitácora de decisiones →](./BITACORA.md)**: los diez hallazgos, lo que no funcionó y por qué.
 
 ---
 
@@ -94,7 +94,7 @@ compose.yaml            la aplicación en su máquina, con perfil opcional de ob
 .gitlab-ci.yml          el mismo pipeline en GitLab CI (Reto 2)
 terraform/              la protección de main y los ambientes, como código (Reto 6)
 PIPELINE.md             el detalle del pipeline: una sola construcción, herramientas, CVE
-BITACORA.md             las decisiones y los nueve hallazgos
+BITACORA.md             las decisiones y los diez hallazgos
 .github/
     workflows/ci-cd.yml los ocho jobs
     dependabot.yml      revisión diaria con cooldown, y eslint agrupado
@@ -164,7 +164,7 @@ El Secret `db-credenciales` se crea **en el clúster**, una sola vez. No está e
 
 ## Bitácora de decisiones
 
-El relato largo —los nueve hallazgos, lo que se rompió y cómo— está en [BITACORA.md](./BITACORA.md). Aquí va una entrada por cada cosa que decidí, en el formato que pide el enunciado.
+El relato largo —los diez hallazgos, lo que se rompió y cómo— está en [BITACORA.md](./BITACORA.md). Aquí va una entrada por cada cosa que decidí, en el formato que pide el enunciado.
 
 ### B2: dos herramientas cambiadas
 
