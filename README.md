@@ -88,6 +88,7 @@ observabilidad/         Prometheus y Grafana con un dashboard RED ya armado
 compose.yaml            la aplicación en su máquina, con perfil opcional de observabilidad
 .devcontainer/          para que todo arranque solo en GitHub Codespaces
 
+terraform/              la protección de main y los ambientes, como código (Reto 6)
 PIPELINE.md             el detalle del pipeline: una sola construcción, herramientas, CVE
 BITACORA.md             las decisiones y los ocho hallazgos
 .github/
