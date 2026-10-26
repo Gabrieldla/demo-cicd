@@ -7,6 +7,47 @@
 
 ---
 
+## El pipeline, de un vistazo
+
+Ocho jobs encadenados con `needs`. Tres arrancan a la vez —`lint`, `sast` y `test-unit`— porque ninguno depende de los otros. Si una etapa falla, las que vienen detrás no corren.
+
+```mermaid
+flowchart LR
+    L["1 lint"]
+    S["2 sast"] --> P["5 package"] --> SEC["6 security"]
+    TU["3 test-unit"] --> TI["4 test-integration"]
+    SEC --> DEV["7 deploy-dev<br/>k3d, efímero"]
+    TI --> DEV
+    DEV --> AP{"aprobación"} --> STG["8 deploy-staging<br/>mi Rancher Desktop"]
+    style L fill:#4ba3c7,stroke:#4ba3c7,color:#fff
+    style S fill:#d9635f,stroke:#d9635f,color:#fff
+    style TU fill:#4ba3c7,stroke:#4ba3c7,color:#fff
+    style TI fill:#4ba3c7,stroke:#4ba3c7,color:#fff
+    style P fill:#e8a23b,stroke:#e8a23b,color:#fff
+    style SEC fill:#d9635f,stroke:#d9635f,color:#fff
+    style DEV fill:#3b7d45,stroke:#3b7d45,color:#fff
+    style AP fill:#fff3cd,stroke:#b58105,color:#5c4300
+    style STG fill:#1f2024,stroke:#1f2024,color:#fff
+```
+
+| # | Etapa | Herramienta | Qué revisa | Si falla | Corre en |
+|---|---|---|---|---|---|
+| 1 | `lint` | ESLint, HTMLHint, Hadolint | Estilo del JavaScript, del HTML y de los tres Dockerfiles | No se puede mezclar el PR | PR y push |
+| 2 | `sast` | Semgrep, **TruffleHog** | Patrones peligrosos en el código y secretos en el historial de lo que se va a mezclar | No se empaqueta nada | PR y push |
+| 3 | `test-unit` | Vitest | La lógica de la API con un pool falso, y el sitio con jsdom | No se prueba la integración | PR y push |
+| 4 | `test-integration` | Vitest + Compose | La aplicación entera levantada, entrando por nginx | No se despliega a DEV | PR y push |
+| 5 | `package` | Buildx, GHCR | Construye y publica `web`, `api` y `db` con el tag del commit | No hay imagen que escanear | PR y push |
+| 6 | `security` | Trivy (`CRITICAL,HIGH`) | Vulnerabilidades de la imagen ya publicada | Nada llega a ningún ambiente | PR y push |
+| 7 | `deploy-dev` | **k3d**, OWASP ZAP | Despliega en un clúster efímero, corre smoke e integración contra él y lo ataca con ZAP | No se pide aprobación | solo push a `main` |
+| 8 | `deploy-staging` | runner propio | Despliega en mi Rancher Desktop, en http://localhost:30090 | STAGING se queda como estaba | push a `main`, **tras aprobación** |
+
+Hay dos compuertas. La **técnica**: `main` está protegida con diez checks obligatorios, así que un PR en rojo no se puede mezclar. Y la **humana**: `deploy-staging` usa el environment `staging` con *Required reviewers*, y el job espera hasta que apruebo. Eso es Continuous **Delivery**; para convertirlo en Continuous Deployment bastaría quitar esa regla, sin tocar el workflow.
+
+> 📄 **[Más detalle en PIPELINE.md →](./PIPELINE.md)**: por qué se construye una sola vez, las herramientas que cambié y cómo se tratan las vulnerabilidades.
+> 📓 **[Bitácora de decisiones →](./BITACORA.md)**: los siete hallazgos, lo que no funcionó y por qué.
+
+---
+
 ## El enunciado original de la plantilla
 
 
@@ -130,6 +171,33 @@ Dos de estas roturas no se detuvieron donde debían, y ahí está lo que de verd
 - La #2 pasó **el pipeline completo en verde** en el [primer intento](../../actions/runs/40248534371): tres minutos, doce jobs, todo limpio, con un `eval()` sobre entrada del usuario dentro.
 
 Y probando la #5 descubrí que TruffleHog, con la configuración que le puse, calla ante cuatro de cada cinco secretos de prueba. Las tres cosas están contadas con detalle en [BITACORA.md](BITACORA.md).
+
+## Pipeline rápido (B6)
+
+Lo que mido es el **camino crítico hasta poder mezclar**: desde que arranca el primer job hasta que acaba el último de los diez que protegen `main`. Es el tiempo que alguien espera de verdad mirando un PR.
+
+| Job | Antes: dura | Antes: arranca | Después: dura | Después: arranca |
+|---|---|---|---|---|
+| 1. lint | 16 s | +1 s | 18 s | +0 s |
+| 2. sast | 21 s | +0 s | 24 s | +0 s |
+| 3. test-unit | 11 s | **+18 s** | 12 s | **+1 s** |
+| 4. test-integration | 39 s | **+31 s** | 32 s | **+15 s** |
+| 5. package (web) | 39 s | +72 s | 23 s | +27 s |
+| 5. package (api) | 47 s | **+72 s** | 23 s | **+26 s** |
+| 5. package (db) | 44 s | +72 s | 33 s | +27 s |
+| 6. security (web) | 21 s | +121 s | 28 s | +63 s |
+| 6. security (api) | 22 s | +121 s | 29 s | +63 s |
+| 6. security (db) | 31 s | **+122 s** | 32 s | **+63 s** |
+| **Total** | **153 s** | | **95 s** | **−38 %** |
+
+- **Antes:** [run 40247656671](../../actions/runs/40247656671), el primer run completo en verde.
+- **Después:** [run 40261275154](../../actions/runs/40261275154).
+
+La mejora no está en la columna de lo que **dura** cada job —ahí los números casi no se mueven, e incluso suben—, está en la columna de cuándo **arranca**. `test-unit` esperaba a `lint` sin motivo, y `package` esperaba a `test-integration`: 46 segundos de cola antes de empezar a construir. Publicar una imagen no es desplegarla, y `deploy-dev` sigue necesitando a las dos compuertas, así que no se saltó ninguna.
+
+Lo único que bajó de verdad por otra razón es `package (api)`, de 47 s a 23 s, y eso sí fue la caché de capas de Docker.
+
+El runner alojado varía bastante: el mismo pipeline, sin tocar nada, me ha dado entre 95 s y 104 s. Por eso lo que vale es el cambio en el momento de arranque, que depende del grafo y no de la suerte.
 
 ## Lo que no está aquí, a propósito
 

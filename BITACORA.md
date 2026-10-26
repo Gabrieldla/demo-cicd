@@ -106,17 +106,28 @@ Resultado final: **0 fallos y 0 avisos**, 63 comprobaciones pasadas y 4 aceptada
 
 ## B6: dónde estaba realmente el tiempo
 
-| | Jobs | Duración |
-|---|---|---|
-| Primer run completo en verde | 10 | **155 s** |
-| Después de optimizar | 10 | **86 s** |
+La tabla job por job está en el README. Lo que mido es el **camino crítico hasta poder mezclar**: desde que arranca el primer job hasta que acaba el último de los diez que protegen `main`. Es el tiempo que alguien espera de verdad mirando el PR, y es lo que hace que un pipeline se respete o se ignore.
 
-Son **−44 %**, bastante por encima del 25 % que pedía el criterio. Lo que más me sorprendió es de dónde salió la mejora: **casi toda del grafo, no de las cachés**.
+| | Run | Camino crítico |
+|---|---|---|
+| Primer run completo en verde | [40247656671](https://github.com/Gabrieldla/demo-cicd/actions/runs/40247656671) | **153 s** |
+| Después de optimizar | [40261275154](https://github.com/Gabrieldla/demo-cicd/actions/runs/40261275154) | **95 s** |
+
+Son **−38 %**, por encima del 25 % que pedía el criterio. Lo que más me sorprendió es de dónde salió la mejora: **casi toda del grafo, no de las cachés**. Se ve en el minuto en que cada etapa *arranca*, no en lo que dura:
+
+| Etapa | Arrancaba en | Arranca en |
+|---|---|---|
+| 3. Pruebas unitarias | +18 s (esperando a `lint`) | **+1 s** |
+| 4. Integración | +31 s | **+15 s** |
+| 5. Empaquetar | +72 s (esperando a integración) | **+26 s** |
+| 6. Escaneo de imagen | +121 s | **+63 s** |
 
 - `test-unit` esperaba a `lint` sin ninguna razón: un error de estilo no invalida una prueba, ni una prueba rota se arregla formateando.
-- `package` esperaba a `test-integration`, 35 segundos del camino crítico. Pero **publicar una imagen no es desplegarla**: si la integración falla, la compuerta de DEV lo frena igual, porque `deploy-dev` necesita a las dos. Lo único que se pierde en ese caso es una imagen publicada que nadie usa, y eso es más barato que 35 segundos en cada run.
+- `package` esperaba a `test-integration`, y eso era lo caro: **46 segundos de cola** antes de empezar a construir. Pero **publicar una imagen no es desplegarla**: si la integración falla, la compuerta de DEV lo frena igual, porque `deploy-dev` necesita a las dos. Lo único que se pierde en ese caso es una imagen publicada que nadie usa, y eso es más barato que 46 segundos en cada run.
 
-Las cachés (capas de Docker y base de datos de Trivy) ayudaron, pero el salto grande vino de dejar de hacer cola donde no hacía falta. La pregunta útil no es "¿cómo hago cada paso más rápido?", sino "¿qué está esperando a qué, y por qué?".
+Las cachés también ayudaron —`package (api)` bajó de 47 s a 23 s con la caché de capas de Docker—, pero el salto grande vino de dejar de hacer cola donde no hacía falta. La pregunta útil no es "¿cómo hago cada paso más rápido?", sino "¿qué está esperando a qué, y por qué?".
+
+**Una honestidad sobre los números:** los primeros que escribí aquí (155 s → 86 s) no los pude reproducir desde la pestaña Actions, y los cambié por los dos runs de arriba, que sí se pueden abrir y comprobar. El runner alojado varía bastante de un run a otro: el mismo pipeline, sin tocar nada, me ha dado entre 95 s y 104 s. Por eso lo que vale es el cambio en el **momento de arranque** de cada etapa, que depende del grafo y no de la suerte, y no el total al segundo.
 
 ---
 
@@ -142,3 +153,38 @@ Lo importante es hacia dónde falla cuando no sabe: **reporta**. Si mañana el r
 Y confirma lo que escribí al elegir la herramienta, que entonces era solo una intuición: si dejara `--results=verified` a secas, la credencial de Postgres —la única real de las cinco, la que apunta a mi propia base— **no se habría reportado**, porque TruffleHog no tiene forma de verificarla. El filtro por defecto habría dejado pasar justo la que importaba.
 
 **Qué me llevo:** un escáner de secretos no se configura, se calibra. Y la única forma de saber qué deja pasar es darle secretos de prueba y mirar cuáles no aparecen, porque los que no aparecen no dejan rastro en ningún log.
+
+---
+
+## Hallazgo 6: el escáner de secretos miraba ramas que no eran la mía
+
+El PR de esta misma bitácora, que **solo toca archivos `.md`**, falló en la etapa de secretos:
+
+```
+Detector Type: Postgres
+File: api/server.js
+Line: 11
+exit code 183
+```
+
+`api/server.js` no está tocado en ese PR. Esa línea vive en `romper/5-secreto`, otra rama.
+
+La causa es que `trufflehog git file:///repo` recorre **todas las ramas del repositorio**, no la que el runner tiene desplegada. Y con `fetch-depth: 0`, puesto justo para que el escaneo vea el historial completo, el runner se trae todas. Así que una rama con un secreto a propósito ponía la etapa 2 en rojo **en cualquier rama, para siempre**. Y las cinco ramas `romper/*` están abiertas a propósito: son la evidencia del B3.
+
+Lo arreglé apuntando el escaneo al historial alcanzable desde lo que se va a mezclar. No es aflojar la compuerta, es hacerle la pregunta correcta: *¿esto que voy a integrar trae un secreto?*
+
+**Lo que me costó decidir** fue si eso era hacer trampa. Lo pensé así: un secreto empujado a cualquier rama **está filtrado de verdad**, y eso no se arregla borrando la rama ni cambiando el escáner, se arregla **rotando la credencial**. Lo que sí se arregla aquí es que la compuerta pueda volver a ponerse verde. Una compuerta que está en rojo pase lo que pase no frena nada: a los dos días alguien la desactiva, o peor, aprende a ignorar el rojo. Eso es más peligroso que el secreto original.
+
+Y hay una consecuencia que no había pensado: **un secreto no se puede "arreglar" con un commit encima**. Las otras cuatro roturas vuelven a verde con un commit que deshace el daño; la del secreto no, porque sigue en el historial de su rama. Es la demostración más clara de por qué la respuesta a una credencial filtrada es rotarla y no borrarla.
+
+---
+
+## Hallazgo 7: la aprobación manual no era el último obstáculo
+
+STAGING fue lo último en funcionar, y llegar ahí me costó tres intentos con tres causas distintas. Lo anoto porque la lección no es ninguna de las tres por separado.
+
+1. **El shell.** `shell: bash` en un runner de Windows resuelve el stub de WSL (`WindowsApps\bash.EXE`) y el job muere con `execvpe(/bin/bash): No such file or directory`, porque instalé WSL sin distribución: la suya la trae Rancher Desktop. Intenté arreglarlo dando la ruta absoluta de Git Bash como shell y **salió peor**: el runner la pasa por un `Path.Combine` de .NET y revienta con `Second path fragment must not be a drive or UNC name` antes de ejecutar una sola línea. El job terminó en `shell: powershell`, que el runner de Windows resuelve siempre, invocando el ejecutable de Git Bash a mano donde hacen falta los scripts.
+2. **El clúster no estaba preparado.** El namespace `demo-staging` y el Secret `db-credenciales` son paso manual **por diseño** —STAGING es persistente, no se recrea en cada run— y nunca los había creado. El pipeline no podía saberlo: `kubectl apply` contra un namespace que no existe falla, y punto.
+3. **El puerto estaba ocupado.** `nodePort: 30080` lo tenía el sitio del LAB-02, que sigue corriendo en mi clúster desde hace veinticinco días. `kubectl` lo rechaza con `provided port is already allocated`. Moví STAGING a 30090 en vez de tirar el otro ambiente: mover un puerto cuesta una línea, y tirar la evidencia de otro laboratorio no se deshace.
+
+**Qué me llevo:** las tres fallaron en el único job que corre en mi máquina, y ninguna habría aparecido en un runner de GitHub. Un ambiente que solo existe en una laptop no está probado hasta que se despliega en esa laptop, y cada intento costaba una aprobación manual mía. Después del segundo fallo dejé de adivinar y corrí a mano la secuencia completa —`desplegar.sh`, los tres `rollout status`, `smoke.sh`— hasta verla en verde en local. Recién entonces volví a pedir la aprobación. Probar en el sitio sale más barato que probar en el pipeline.
