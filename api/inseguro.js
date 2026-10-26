@@ -1,6 +1,11 @@
-// Patrón peligroso a propósito: ejecutar como código una cadena que viene del
-// usuario. Semgrep lo detecta y la etapa 2 (SAST) se pone en rojo.
-export function calcular(expresionDelUsuario) {
+// Vulnerabilidad metida a propósito para el B3: una ruta que ejecuta como código
+// lo que llega en la URL. Es inyección de código de manual, y el SAST debe cazarla.
+import express from "express";
+
+export const rutasInseguras = express.Router();
+
+rutasInseguras.get("/api/calcular", (req, res) => {
   // eslint-disable-next-line no-eval
-  return eval(expresionDelUsuario);
-}
+  const resultado = eval(req.query.expresion);
+  res.json({ resultado });
+});
