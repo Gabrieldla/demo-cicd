@@ -48,7 +48,7 @@ La tabla con los enlaces está en el README. Aquí va lo que aprendí, que es m�
 
 ### Hallazgo 3: lo barato se detecta temprano
 
-Es lo que el enunciado quería que viera, y los números lo dicen solos: un error de estilo cuesta **24 segundos**; una vulnerabilidad en una imagen base exige construir, publicar y escanear primero, y cuesta **2 minutos y medio**. Seis veces más caro por el mismo tipo de error humano. Esa es toda la razón de ordenar el pipeline de lo barato a lo caro.
+Es lo que el enunciado quería que viera, y los números lo dicen solos: un error de estilo cuesta **23 segundos**; una vulnerabilidad en una imagen base exige construir, publicar y escanear primero, y cuesta **2 minutos y medio**. Seis veces más caro por el mismo tipo de error humano. Esa es toda la razón de ordenar el pipeline de lo barato a lo caro.
 
 ---
 
