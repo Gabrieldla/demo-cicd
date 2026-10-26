@@ -87,6 +87,14 @@ k8s/
 observabilidad/         Prometheus y Grafana con un dashboard RED ya armado
 compose.yaml            la aplicación en su máquina, con perfil opcional de observabilidad
 .devcontainer/          para que todo arranque solo en GitHub Codespaces
+
+PIPELINE.md             el detalle del pipeline: una sola construcción, herramientas, CVE
+BITACORA.md             las decisiones y los ocho hallazgos
+.github/
+    workflows/ci-cd.yml los ocho jobs
+    dependabot.yml      revisión diaria con cooldown, y eslint agrupado
+.trivyignore            las CVE aceptadas, cada una con su motivo y su fecha
+.zap/rules.tsv          las alertas de ZAP aceptadas, cada una con su motivo
 ```
 
 ## Correrlo en su máquina
@@ -201,8 +209,6 @@ El runner alojado varía bastante: el mismo pipeline, sin tocar nada, me ha dado
 
 ## Lo que no está aquí, a propósito
 
-- `.github/workflows/`: el pipeline. Es el trabajo de la guía y del laboratorio
-- `.github/dependabot.yml`
 - Los ambientes de GitHub (`dev`, `staging`) y la protección de `main`
 - La configuración de los runners, de GitLab CI, de Argo CD y de todo lo que piden los retos
 
