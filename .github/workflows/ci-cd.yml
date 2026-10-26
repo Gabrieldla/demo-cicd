@@ -198,7 +198,7 @@ jobs:
           echo "TRIVY_CACHE_DIR=${GITHUB_WORKSPACE}/.cache/trivy" >> "$GITHUB_ENV"
       # B6: la base de datos de vulnerabilidades pesa cientos de MB y Trivy la
       # descarga en cada job. Se guarda entre runs, con una clave por servicio.
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.cache/trivy
           key: trivy-db-${{ matrix.servicio }}-${{ github.run_id }}
