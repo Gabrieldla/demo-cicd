@@ -91,6 +91,7 @@ observabilidad/         Prometheus y Grafana con un dashboard RED ya armado
 compose.yaml            la aplicación en su máquina, con perfil opcional de observabilidad
 .devcontainer/          para que todo arranque solo en GitHub Codespaces
 
+.gitlab-ci.yml          el mismo pipeline en GitLab CI (Reto 2)
 terraform/              la protección de main y los ambientes, como código (Reto 6)
 PIPELINE.md             el detalle del pipeline: una sola construcción, herramientas, CVE
 BITACORA.md             las decisiones y los ocho hallazgos
@@ -195,6 +196,40 @@ El relato largo —los ocho hallazgos, lo que se rompió y cómo— está en [BI
 - **Cómo lo verifiqué:** [run 40262023942](../../actions/runs/40262023942), con el artefacto `informe-zap`. Antes de subirlo levanté la aplicación en local y corrí el mismo contenedor: 0 fallos, 0 avisos, 63 comprobaciones pasadas y 6 aceptadas con su motivo escrito en `.zap/rules.tsv`.
 - **Qué no me funcionó:** puse `unsafe-inline` en `style-src` dando por hecho que el HTML traía estilos en línea. No los trae: todo viene de `estilos.css`. Debilité la política para resolver un problema que no existía, y la cabecera seguía pareciendo correcta. Lo descubrí días después, revisando otra alerta. Y el escaneo pasó limpio en local contra Compose y puso `deploy-dev` en rojo con cuatro avisos al correr contra el clúster: ahí el escáner recorrió más rutas.
 
+### Reto 2: El mismo pipeline en GitLab CI
+
+- **Decisión:** un [`.gitlab-ci.yml`](./.gitlab-ci.yml) con las mismas siete etapas y **las mismas herramientas** que el de GitHub Actions, con el despliegue en `when: manual`.
+- **Alternativas que evalué:**
+  - *Usar las plantillas de seguridad de GitLab* (`Security/SAST.gitlab-ci.yml`, `Secret-Detection`): dos líneas y tienes SAST y detección de secretos, con los informes integrados en la interfaz. Pero usan **otras** reglas y otros motores.
+  - *Traducir el workflow línea por línea*: parece lo más fiel y es lo peor. GitLab resuelve algunas cosas de otra forma, y forzarlo a parecerse a GitHub produce un archivo que no es idiomático en ninguna de las dos.
+- **Por qué elegí esta:** mantener Semgrep, TruffleHog y Trivy **con las mismas versiones fijas**. Si el SAST de GitLab usara otras reglas, un run verde aquí y uno verde allá no significarían lo mismo, y entonces comparar las dos plataformas no demuestra nada: el objetivo del reto es ver qué cambia en la plataforma, no cambiar también las herramientas y no saber a qué atribuir la diferencia.
+- **Fuentes consultadas:**
+  - [Referencia de `.gitlab-ci.yml`](https://docs.gitlab.com/ci/yaml/) — `needs: []`, `parallel: matrix`, `rules:if`
+  - [Variables predefinidas](https://docs.gitlab.com/ci/variables/predefined_variables/) — `$CI_REGISTRY_IMAGE`, `$CI_COMMIT_SHA`, `$CI_JOB_TOKEN`
+  - [Docker-in-Docker](https://docs.gitlab.com/ci/docker/using_docker_build/) — por qué hace falta `DOCKER_HOST` y los certificados TLS
+- **Cómo lo verifiqué:** el YAML lo validé con un parser, y **las seis etiquetas de imágenes las comprobé una por una contra Docker Hub**: cuatro de las que había escrito de memoria no existían (`hadolint:2.14.0-alpine`, `docker:28.6.0`, `bitnami/kubectl:1.34.1`). Un pipeline que referencia una etiqueta inventada falla en el primer segundo. **Lo que falta es correrlo en gitlab.com**, y eso necesita una cuenta y un espejo del repositorio: está pendiente de mí, no del archivo.
+- **Qué no me funcionó:** dos cosas que no se traducen y que son lo más interesante del reto. Primera: el job de despliegue **no puede correr en los runners compartidos de gitlab.com**, porque STAGING es mi laptop y gitlab.com no la alcanza; necesita un runner propio con etiqueta, exactamente la misma restricción que me obligó a registrar un runner self-hosted en GitHub. Es una restricción de la red, no de la plataforma. Segunda: `when: manual` **no es lo mismo** que un environment con *required reviewers*. En GitHub la aprobación la da un revisor designado; en GitLab la da cualquiera con permiso de escritura. Para una aprobación con nombre y apellido, GitLab tiene *protected environments*, que es de pago. La compuerta humana se ve igual y no vale lo mismo.
+
+| | GitHub Actions | GitLab CI |
+|---|---|---|
+| Unidad de trabajo | `job` dentro de un workflow | `job` dentro de un `stage` |
+| Orden | `needs:` entre jobs | `stages:` por orden, y `needs:` para saltarse la fila |
+| Correr en paralelo | jobs sin `needs` entre ellos | jobs en el mismo `stage` |
+| Repetir con variantes | `strategy.matrix` | `parallel: matrix` |
+| Dónde corre cada paso | el runner, con las herramientas instaladas | **un contenedor por job** (`image:`) |
+| Servicios auxiliares | `services:` o `docker compose` a mano | `services:` (aquí, `docker:dind`) |
+| Registro de imágenes | `ghcr.io/<usuario>/<repo>` | `$CI_REGISTRY_IMAGE` |
+| Credencial del registro | `GITHUB_TOKEN`, efímero | `$CI_JOB_TOKEN`, efímero |
+| Etiqueta del commit | `github.sha` | `$CI_COMMIT_SHA` |
+| Variables del workflow | `env:` | `variables:` |
+| Caché de dependencias | `cache: npm` en `setup-node` | `cache:` declarada a mano, con `key:files:` |
+| Solo en la rama principal | `if: github.ref == 'refs/heads/main'` | `rules: - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH` |
+| Un PR no despliega | `if: github.event_name != 'pull_request'` | las mismas `rules:`, que no se cumplen en un MR |
+| Aprobación humana | `environment:` con *required reviewers* | `when: manual` (revisor designado solo en *protected environments*, de pago) |
+| Runner propio | `runs-on: self-hosted` | `tags: [laptop]` |
+| Resumen del run | `$GITHUB_STEP_SUMMARY` | no hay equivalente directo; se usan artefactos y `reports:` |
+| Profundidad del clon | `fetch-depth: 0` | `GIT_DEPTH: 0` |
+
 ### Reto 3: Observabilidad en STAGING
 
 - **Decisión:** Prometheus, Alertmanager y Grafana con manifiestos propios en el namespace `observabilidad`, descubriendo los pods por las anotaciones `prometheus.io/*`, con el dashboard RED que ya existía y una alerta de 5xx por encima del 5 % durante un minuto.
@@ -208,6 +243,31 @@ El relato largo —los ocho hallazgos, lo que se rompió y cómo— está en [BI
   - [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack), para medir lo que estaba descartando
 - **Cómo lo verifiqué:** las pruebas de la regla corren en la **etapa 3** del pipeline, así que cada run es la evidencia. Tres casos: dispara con 17 % de 5xx (con el valor real en la anotación, `16.67%`), **no** dispara a los 30 s por el `for: 1m`, no dispara con un 2 % y no dispara sin tráfico. Y en el clúster, `scripts/provocar-errores.sh` tumba la base de STAGING para verla saltar de verdad.
 - **Qué no me funcionó:** la primera versión de la regla dividía errores entre total y nada más. Sin tráfico eso es `0/0 = NaN`, la comparación no se cumple y **parece que todo va bien**. No lo vi mirando Prometheus: lo vi al escribir el tercer caso de prueba, que era justamente "sin tráfico". Si no hubiera escrito pruebas para una alerta —porque total, es solo una consulta— se habría quedado así.
+
+### Reto 4: GitOps con Argo CD — no lo intenté, y por qué
+
+- **Decisión:** **no instalar Argo CD.** Es el único reto que dejé fuera a conciencia, y lo documento porque la razón es el tipo de cosa que quería aprender a mirar.
+- **El dato que lo decidió:** Argo CD publica qué versiones de Kubernetes prueba con cada versión suya.
+
+  | Argo CD | Kubernetes soportado |
+  |---|---|
+  | 3.5 (la actual) | v1.33 – v1.36 |
+  | 2.14 | v1.28 – v1.31 |
+  | **2.11** | **v1.25** – v1.29 |
+
+  Mi clúster es **k3s v1.25.16**, el que trae mi Rancher Desktop. El Argo CD más nuevo que lo soporta es **2.11**, de 2024 y fuera de soporte.
+
+- **Alternativas que evalué:**
+  - *Instalar Argo CD 2.11 igual*: funciona y me daba el punto. Pero sería meter en mi clúster software sin mantenimiento ni parches de seguridad, justo después de haber escrito una bitácora entera sobre fijar versiones, subir al LTS y rechazar una actualización porque arrastraba una CVE. No puedo defender las dos cosas a la vez.
+  - *Subir la versión de Kubernetes en Rancher Desktop*: resuelve el problema de raíz, pero **recrea el clúster**. Se pierde el namespace `perfil`, que es el sitio del LAB-02 corriendo desde hace 25 días y la evidencia de ese laboratorio, y los datos del libro de visitas de STAGING. Un reto de 1.5 puntos no paga tirar la entrega de otro laboratorio.
+- **Por qué elegí esta:** porque la alternativa barata era incoherente y la alternativa buena era destructiva. Y hay un segundo motivo medido: `kubectl top nodes` me da **6314Mi de 7.8Gi, el 81 %**, y Argo CD son cinco pods más, encima de los tres de observabilidad que acabo de meter.
+- **Fuentes consultadas:**
+  - [Versiones de Kubernetes probadas con cada Argo CD](https://github.com/argoproj/argo-cd/blob/master/docs/operator-manual/tested-kubernetes-versions.md)
+  - [Declarative setup de Argo CD](https://argo-cd.readthedocs.io/en/stable/operator-manual/declarative-setup/), que es por donde habría empezado
+- **Cómo lo verifiqué:** `kubectl version` → `v1.25.16+k3s4`, y la tabla de arriba la leí de la documentación de cada release de Argo CD, no de memoria.
+- **Qué no me funcionó:** lo que **no** hice y casi hice. Mi primer impulso fue instalar la versión más nueva y ver qué pasaba. Habría arrancado: los CRD se aplican igual y los pods levantan. El problema son los fallos que aparecen después, con APIs que el servidor viejo no tiene, y entonces ya tengo medio despliegue en un clúster que no puedo recrear sin perder otra cosa. Comprobar la compatibilidad **antes** de instalar costó cinco minutos.
+
+  Y una pregunta del enunciado que vale la pena contestar aunque no haya montado el reto: *¿qué ganas y qué pierdes cuando el pipeline ya no toca el clúster?* Ganas que el estado deseado esté en Git, auditable y revertible con un `git revert`, y que un cambio a mano en el clúster se deshaga solo. Pierdes la relación directa entre "el run terminó" y "está desplegado": el run acaba cuando hizo el commit, y lo que pasa después ya no sale en Actions. El smoke test deja de probar el despliegue y pasa a probar lo que haya en ese momento. Y el pipeline deja de necesitar credenciales del clúster, que es la mitad del argumento de GitOps y lo que lo hace valer para un ambiente real al que no quiero darle acceso a GitHub.
 
 ### Reto 6: La plataforma también es código
 
