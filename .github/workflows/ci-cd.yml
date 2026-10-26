@@ -262,6 +262,20 @@ jobs:
           sleep 3
           bash scripts/smoke.sh http://localhost:8080
           APP_URL=http://localhost:8080 npm run test:integration
+      # Reto 1: DAST. El SAST revisa el código quieto; esto ataca la aplicación
+      # corriendo. Aprovecha que DEV ya está levantado dentro de este mismo runner.
+      - name: DAST con OWASP ZAP contra DEV
+        run: |
+          mkdir -p zap-salida && chmod 777 zap-salida
+          docker run --rm --network host             -v "$PWD/zap-salida:/zap/wrk:rw" -v "$PWD/.zap:/zap/conf:ro"             ghcr.io/zaproxy/zaproxy:2.16.1             zap-baseline.py -t http://localhost:8080             -r informe-zap.html -c /zap/conf/rules.tsv
+
+      - name: Guardar el informe de ZAP
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: informe-zap
+          path: zap-salida/
+
       - name: Diagnóstico (solo si algo falló)
         if: failure()
         run: |
