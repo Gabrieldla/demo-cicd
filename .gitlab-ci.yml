@@ -1,0 +1,217 @@
+# El mismo pipeline, en GitLab CI (Reto 2 del LAB-04).
+#
+# No es una traducción línea por línea: GitLab resuelve algunas cosas de otra forma
+# y forzarlo a parecerse a GitHub Actions habría sido peor. Las equivalencias y las
+# diferencias que importan están en la tabla del README.
+#
+# Lo que se mantiene igual a propósito:
+#   - El orden de lo barato a lo caro: lint y SAST antes de construir nada.
+#   - Se construye UNA vez y se etiqueta con el commit. Lo que se escanea y lo que
+#     se despliega es el mismo binario, no dos builds que se parecen.
+#   - El despliegue es manual. Esto es Continuous Delivery, no Deployment.
+#   - Las imágenes de herramientas van con versión fija, nunca :latest.
+
+stages:
+  - calidad
+  - pruebas
+  - construir
+  - seguridad
+  - desplegar
+
+variables:
+  # En GitHub esto era env.NODE_VERSION. Tiene que coincidir con el FROM del
+  # Dockerfile de la api: probar con una versión y servir con otra es pedir un
+  # fallo que solo aparece en producción.
+  NODE_VERSION: "24"
+  # $CI_REGISTRY_IMAGE es el equivalente de ghcr.io/<usuario>/<repo>, y lo da
+  # GitLab. $CI_COMMIT_SHA es el equivalente de github.sha.
+  ETIQUETA: sha-$CI_COMMIT_SHA
+  # Sin esto, dentro de docker:dind el cliente no encuentra el demonio.
+  DOCKER_HOST: tcp://docker:2376
+  DOCKER_TLS_CERTDIR: "/certs"
+  DOCKER_TLS_VERIFY: "1"
+  DOCKER_CERT_PATH: "/certs/client"
+
+# ─── 1. Lint ─────────────────────────────────────────────────────────────────────
+lint:
+  stage: calidad
+  image: node:24-alpine
+  cache:
+    # GitLab no tiene el equivalente de "cache: npm" de setup-node: la caché se
+    # declara a mano, y la clave se ata al lockfile para que se invalide cuando
+    # cambien las dependencias y no antes.
+    key:
+      files: [package-lock.json, api/package-lock.json]
+    paths: [.npm/]
+  before_script:
+    - npm ci --cache .npm --prefer-offline
+  script:
+    - npm run lint
+    - npm run lint:html
+  # Los Dockerfile se revisan con hadolint en su propio job, porque necesita otra
+  # imagen y así los dos corren en paralelo dentro de la misma etapa.
+
+lint:dockerfiles:
+  stage: calidad
+  image: hadolint/hadolint:v2.15.1-alpine
+  script:
+    - hadolint web/Dockerfile api/Dockerfile db/Dockerfile
+
+# ─── 2. SAST y secretos ──────────────────────────────────────────────────────────
+#
+# GitLab trae plantillas listas (Security/SAST.gitlab-ci.yml, Secret-Detection).
+# No las uso, y es una decisión: el objetivo del reto es demostrar que sé armar el
+# pipeline, y además quiero LAS MISMAS herramientas que en GitHub. Si el SAST de
+# GitLab usara otras reglas, un run verde aquí y uno verde allá no significarían
+# lo mismo, y comparar dos pipelines distintos no prueba nada.
+sast:
+  stage: calidad
+  image: semgrep/semgrep:1.180.0
+  script:
+    - semgrep scan --config p/ci --config p/dockerfile --config p/javascript --error --metrics=off .
+
+secretos:
+  stage: calidad
+  image:
+    name: trufflesecurity/trufflehog:3.99.7
+    entrypoint: [""]
+  variables:
+    # Por defecto GitLab clona en profundidad 50. TruffleHog necesita el historial
+    # completo de la rama, igual que fetch-depth: 0 en GitHub.
+    GIT_DEPTH: 0
+  script:
+    # Solo la rama que se va a mezclar, no todas las del repositorio. Es el mismo
+    # arreglo que en GitHub: con las ramas romper/* abiertas a propósito, escanear
+    # todo el repositorio deja la compuerta en rojo para siempre.
+    - git branch -f escaneo HEAD
+    - trufflehog git file://$CI_PROJECT_DIR --no-update --fail --results=verified,unknown --branch escaneo
+
+# ─── 3. Pruebas unitarias ────────────────────────────────────────────────────────
+pruebas:unitarias:
+  stage: pruebas
+  image: node:24-alpine
+  # En GitHub, test-unit NO espera a lint: un error de estilo no invalida una
+  # prueba. Aquí comparten etapa, así que GitLab ya los corre en paralelo; el
+  # "needs: []" es lo que permite que empiece sin esperar la etapa anterior.
+  needs: []
+  cache:
+    key:
+      files: [package-lock.json, api/package-lock.json]
+    paths: [.npm/]
+    policy: pull
+  before_script:
+    - npm ci --cache .npm --prefer-offline
+    - npm ci --cache .npm --prefer-offline --prefix api
+  script:
+    - npm run test:unit
+    - npm run test:site
+
+pruebas:alertas:
+  stage: pruebas
+  needs: []
+  image:
+    name: prom/prometheus:v3.15.1
+    entrypoint: [""]
+  script:
+    # Una regla de alerta es código y se puede equivocar. Mismas pruebas que en
+    # GitHub Actions: dispara con 17 % de 5xx, no dispara sin tráfico.
+    - cd k8s/observabilidad && promtool test rules pruebas-alertas.yml
+
+# ─── 4. Pruebas de integración ───────────────────────────────────────────────────
+pruebas:integracion:
+  stage: pruebas
+  # Hacen falta las dos cosas a la vez: Node para correr las pruebas y el cliente
+  # de Docker para levantar Compose. En GitHub el runner ya traia ambas; aqui el
+  # job es un contenedor y hay que decir que se instala.
+  image: node:24-alpine
+  services:
+    - name: docker:29.9.2-dind
+      alias: docker
+  before_script:
+    - apk add --no-cache docker-cli docker-cli-compose openssl
+    - npm ci
+  script:
+    # El runner no tiene mi .env: se genera una contrasena al vuelo.
+    - echo "DB_PASSWORD=$(openssl rand -hex 12)" > .env
+    - docker compose up -d --build --wait
+    - npm run test:integration
+  after_script:
+    - docker compose logs --tail=50 || true
+    - docker compose down -v || true
+
+# ─── 5. Construir y publicar ─────────────────────────────────────────────────────
+#
+# En GitHub esto era un job con "strategy.matrix". En GitLab el equivalente es
+# "parallel: matrix", y la variable se lee como $SERVICIO.
+construir:
+  stage: construir
+  image: docker:29.9.2-cli
+  services:
+    - name: docker:29.9.2-dind
+      alias: docker
+  parallel:
+    matrix:
+      - SERVICIO: [web, api, db]
+  before_script:
+    # $CI_JOB_TOKEN es de un solo uso y caduca con el job: el equivalente del
+    # GITHUB_TOKEN efímero. No hay ninguna credencial de larga duración guardada.
+    - echo "$CI_JOB_TOKEN" | docker login -u gitlab-ci-token --password-stdin "$CI_REGISTRY"
+  script:
+    - IMAGEN="$CI_REGISTRY_IMAGE/demo-cicd-$SERVICIO"
+    - docker build --pull -t "$IMAGEN:$ETIQUETA" "./$SERVICIO"
+    - docker push "$IMAGEN:$ETIQUETA"
+
+# ─── 6. Escaneo de la imagen ─────────────────────────────────────────────────────
+seguridad:
+  stage: seguridad
+  image:
+    name: aquasec/trivy:0.70.0
+    entrypoint: [""]
+  parallel:
+    matrix:
+      - SERVICIO: [web, api, db]
+  variables:
+    TRIVY_USERNAME: gitlab-ci-token
+    TRIVY_PASSWORD: $CI_JOB_TOKEN
+  script:
+    # CRITICAL,HIGH, que es la regla del curso. Y --ignore-unfixed: una
+    # vulnerabilidad sin parche no se arregla parando el pipeline, se arregla
+    # cuando hay parche. Las excepciones con motivo van en .trivyignore.
+    - trivy image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed
+      --ignorefile .trivyignore "$CI_REGISTRY_IMAGE/demo-cicd-$SERVICIO:$ETIQUETA"
+
+# ─── 7. Desplegar, a mano ────────────────────────────────────────────────────────
+#
+# El equivalente de los "environments con required reviewers" de GitHub: el job no
+# arranca hasta que una persona le da al botón. La diferencia es que en GitHub la
+# aprobación la da un REVISOR designado y aquí la da cualquiera con permiso de
+# escritura; para una aprobación con nombre y apellido, GitLab lo resuelve con
+# "protected environments", que es de pago.
+desplegar:staging:
+  stage: desplegar
+  # La version de kubectl coincide con la del cluster (k3s v1.25.16). kubectl
+  # soporta un desfase de un minor con el servidor; poner el mas nuevo que hay
+  # (1.37) contra un servidor 1.25 es pedir errores raros.
+  image: rancher/kubectl:v1.25.16
+  # ATENCION: este job NO puede correr en los runners compartidos de gitlab.com.
+  # STAGING es mi Rancher Desktop, en mi laptop, y gitlab.com no la alcanza, igual
+  # que no la alcanzaba GitHub. Necesita un runner de GitLab instalado en mi
+  # maquina, con la etiqueta de abajo. Es la misma restriccion que me obligo a
+  # registrar un runner self-hosted para el pipeline de GitHub, y aparece igual
+  # en las dos plataformas: no es un detalle de GitHub.
+  tags: [laptop]
+  when: manual
+  allow_failure: false
+  rules:
+    # Un merge request NO despliega. Solo la rama por defecto.
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  environment:
+    name: staging
+    url: http://localhost:30090
+  script:
+    - kubectl -n demo-staging set image deploy/web web="$CI_REGISTRY_IMAGE/demo-cicd-web:$ETIQUETA"
+    - kubectl -n demo-staging set image deploy/api api="$CI_REGISTRY_IMAGE/demo-cicd-api:$ETIQUETA"
+    - kubectl -n demo-staging set image deploy/db  db="$CI_REGISTRY_IMAGE/demo-cicd-db:$ETIQUETA"
+    - kubectl -n demo-staging rollout status deploy/db  --timeout=180s
+    - kubectl -n demo-staging rollout status deploy/api --timeout=180s
+    - kubectl -n demo-staging rollout status deploy/web --timeout=180s
