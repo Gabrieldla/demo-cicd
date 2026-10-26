@@ -21,11 +21,20 @@ permissions:
   contents: read
 
 # En un PR, cada push nuevo deja obsoleto al anterior: no tiene sentido seguir
-# construyendo tres imágenes de un commit que ya nadie va a mezclar. En main NO se
-# cancela: un run de main puede estar desplegando, y cortarlo a media faena deja el
-# ambiente en un estado que nadie pidió.
+# construyendo tres imágenes de un commit que ya nadie va a mezclar, así que todos
+# los runs de la misma rama comparten grupo y el nuevo cancela al viejo.
+#
+# En main, el grupo lleva el run_id, o sea que cada run es único y NO hace cola
+# detrás de otro. Esto lo aprendí al revés, y rápido: con el grupo compartido en
+# main, un run esperando mi aprobación de STAGING dejaba EN COLA a todos los
+# siguientes. Lo comprobé mirando un run en "pending" mientras el anterior estaba
+# parado en la compuerta. Serializar los despliegues suena prudente, pero una cola
+# cuya cabeza espera a una persona no es una cola: es un bloqueo.
+#
+# Lo que de verdad hacía falta —que un commit nuevo invalide la aprobación
+# pendiente del anterior— está donde corresponde, en el propio job de STAGING.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # El shell por defecto de Actions es "bash -e", SIN pipefail: en una tubería solo

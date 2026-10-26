@@ -279,3 +279,27 @@ Lo arreglé con un grupo de concurrencia por ambiente: un commit nuevo cancela l
 Los seis que ya estaban apilados los cancelé a mano: aparecen como *cancelled* en el historial y es deliberado, son despliegues que quedaron obsoletos antes de ocurrir.
 
 **Qué me llevo:** el enunciado me hizo pensar la aprobación manual como una compuerta de seguridad, y lo es. Pero una aprobación es también una cola, y una cola sin orden es una forma elegante de hacer las cosas en el orden equivocado. "Esperando que alguien decida" no es un estado neutro: cuanto más dura, más caras son las decisiones que se pueden tomar mal.
+
+---
+
+## Hallazgo 10: mi arreglo del hallazgo 9 trajo un problema peor
+
+Para que no se apilaran las aprobaciones puse un grupo de concurrencia en todo el workflow:
+
+```yaml
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+```
+
+El razonamiento me parecía sólido: en un PR se cancela el run viejo, y en `main` no se cancela nada porque un run de `main` puede estar desplegando y cortarlo a media faena deja el ambiente como nadie lo pidió. Serializar los despliegues suena prudente.
+
+Lo mezclé, y al mirar la pestaña Actions vi un run en **`pending`** mientras el anterior seguía corriendo. Eso ya era esperable. Lo que no había pensado es qué pasa cuando el run de la cabeza llega a la **compuerta de aprobación**: se queda ahí, parado, esperándome. Y mientras espera, **sigue ocupando el grupo**. Todos los runs posteriores quedan en cola detrás de él.
+
+O sea que había cambiado "se apilan seis aprobaciones" por algo peor: **el pipeline entero de `main` se detiene hasta que yo apruebe o cancele**. Si me voy a dormir, al día siguiente no hay cinco aprobaciones esperando, hay cinco runs que nunca empezaron, sin lint, sin pruebas y sin escaneo. Una cola cuya cabeza espera a una persona no es una cola: es un bloqueo.
+
+Y no es una hipótesis: me pasó mientras escribía esto. El [run 40383601188](https://github.com/Gabrieldla/demo-cicd/actions/runs/40383601188), el del commit del hallazgo 9, aparece como *cancelled* con **cero jobs ejecutados**. GitHub solo guarda un run en cola por grupo: cuando llegó el siguiente, canceló al que esperaba. Ese commit nunca pasó por el lint, ni por el SAST, ni por las pruebas, ni por Trivy, y el pipeline no dijo nada. Un commit sin revisar en `main`, por una regla que puse yo para hacerlo más ordenado.
+
+El arreglo del arreglo es meter el `run_id` en el grupo cuando no es un PR, así cada run de `main` es único y no hace cola detrás de nadie. Y lo que de verdad hacía falta —que un commit nuevo invalide la aprobación pendiente del anterior— ya estaba donde corresponde: en el grupo del **job** de STAGING, no en el del workflow.
+
+**Qué me llevo:** el hallazgo 9 lo encontré por casualidad, mirando una lista que me pareció desordenada. Este lo encontré porque fui a comprobar que mi arreglo hacía lo que yo creía, y no lo hacía del todo. Son dos formas distintas de encontrar un fallo, y la segunda es la que se puede repetir a propósito: **después de arreglar algo, mirar qué más cambió**. El primer `concurrency` resolvía el síntoma que había visto y creaba uno que no había visto, y las dos cosas estaban en las mismas cuatro líneas.
