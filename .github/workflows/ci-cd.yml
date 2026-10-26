@@ -20,6 +20,15 @@ on:
 permissions:
   contents: read
 
+# El shell por defecto de Actions es "bash -e", SIN pipefail: en una tubería solo
+# cuenta el código de salida del ÚLTIMO comando. Por eso un paso como
+# "npm test | tee salida.txt" quedaba en verde aunque las pruebas fallaran, y la
+# compuerta de pruebas dejaba de existir sin que nadie se enterara.
+# Declarando "shell: bash", Actions usa "bash --noprofile --norc -eo pipefail".
+defaults:
+  run:
+    shell: bash
+
 env:
   NODE_VERSION: "22"
 
