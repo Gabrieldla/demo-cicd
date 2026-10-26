@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: observabilidad
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: prometheus }
+  template:
+    metadata:
+      labels: { app: prometheus }
+    spec:
+      serviceAccountName: prometheus
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.15.1
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            # Dos días de datos. En mi laptop no hay espacio para más y tampoco
+            # hace falta: esto es para ver qué pasó hoy, no para capacity planning.
+            - --storage.tsdb.retention.time=2d
+            - --web.enable-lifecycle
+          ports:
+            - containerPort: 9090
+          resources:
+            # Deliberadamente chico: el clúster está al 80 % de memoria con la
+            # aplicación corriendo. Por eso no uso kube-prometheus-stack.
+            requests: { cpu: 50m, memory: 192Mi }
+            limits: { memory: 512Mi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/prometheus/prometheus.yml, subPath: prometheus.yml }
+            - { name: reglas, mountPath: /etc/prometheus/reglas }
+            - { name: datos, mountPath: /prometheus }
+          readinessProbe:
+            httpGet: { path: /-/ready, port: 9090 }
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet: { path: /-/healthy, port: 9090 }
+            initialDelaySeconds: 30
+      volumes:
+        - name: config
+          configMap: { name: prometheus-config }
+        - name: reglas
+          configMap: { name: prometheus-reglas }
+        # emptyDir y no PVC: si Prometheus se reinicia se pierden las métricas, y
+        # lo acepto. Lo que no quiero perder son los datos del libro de visitas,
+        # y esos sí tienen PVC.
+        - name: datos
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: observabilidad
+spec:
+  type: NodePort
+  selector: { app: prometheus }
+  ports:
+    - port: 9090
+      targetPort: 9090
+      nodePort: 30091

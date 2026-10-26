@@ -103,6 +103,16 @@ jobs:
       - run: npm ci && npm ci --prefix api
       - run: npm run test:unit 2>&1 | tee unit.txt
       - run: npm run test:site 2>&1 | tee site.txt
+      # Una regla de alerta es código: tiene lógica, tiene casos borde y se puede
+      # equivocar. La de 5xx divide entre el total de peticiones, y sin tráfico esa
+      # división es 0/0: mal escrita, se queda callada cuando debería avisar, o
+      # avisa cuando no pasa nada. Eso no se comprueba mirando una gráfica un rato.
+      # promtool le mete series de entrada y afirma qué debe y qué NO debe disparar.
+      - name: Pruebas de las reglas de alerta (promtool)
+        run: >
+          docker run --rm -v "$PWD/k8s/observabilidad:/r:ro" -w /r
+          --entrypoint promtool prom/prometheus:v3.15.1
+          test rules pruebas-alertas.yml 2>&1 | tee alertas.txt
       - name: Resumen de las pruebas
         if: always()
         run: |
@@ -113,6 +123,7 @@ jobs:
             echo "|---|---|"
             echo "| Unitarias (API) | $(grep -oE 'Tests[[:space:]]+[0-9]+ passed' unit.txt | tail -1 || echo 'ver log') |"
             echo "| Sitio | $(grep -oE 'Tests[[:space:]]+[0-9]+ passed' site.txt | tail -1 || echo 'ver log') |"
+            echo "| Reglas de alerta | $(grep -qE '^\s*SUCCESS' alertas.txt && echo 'las 3 en verde' || echo 'ver log') |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   test-integration:

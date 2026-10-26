@@ -1,0 +1,101 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: observabilidad
+data:
+  prometheus.yml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        uid: prometheus
+        access: proxy
+        url: http://prometheus:9090
+        isDefault: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-proveedor-dashboards
+  namespace: observabilidad
+data:
+  dashboards.yml: |
+    apiVersion: 1
+    providers:
+      - name: repositorio
+        folder: ""
+        type: file
+        # Los dashboards se cargan de un archivo, no se crean a mano en la
+        # interfaz. Un dashboard hecho a clics se pierde con el pod.
+        allowUiUpdates: false
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: observabilidad
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: grafana }
+  template:
+    metadata:
+      labels: { app: grafana }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        fsGroup: 472
+      containers:
+        - name: grafana
+          image: grafana/grafana:13.2.4
+          env:
+            # Sin login. Es un ambiente local al que solo llego yo por localhost, y
+            # la alternativa seria poner una contrasena en un manifiesto de un
+            # repositorio publico. Con autenticacion de verdad esto iria en un
+            # Secret del cluster, no aqui.
+            - { name: GF_AUTH_ANONYMOUS_ENABLED, value: "true" }
+            - { name: GF_AUTH_ANONYMOUS_ORG_ROLE, value: "Admin" }
+            - { name: GF_AUTH_BASIC_ENABLED, value: "false" }
+            - { name: GF_SECURITY_ALLOW_EMBEDDING, value: "true" }
+            # Sin telemetria ni comprobacion de version hacia fuera.
+            - { name: GF_ANALYTICS_REPORTING_ENABLED, value: "false" }
+            - { name: GF_ANALYTICS_CHECK_FOR_UPDATES, value: "false" }
+          ports:
+            - containerPort: 3000
+          resources:
+            requests: { cpu: 25m, memory: 128Mi }
+            limits: { memory: 384Mi }
+          volumeMounts:
+            - { name: datasources, mountPath: /etc/grafana/provisioning/datasources }
+            - { name: proveedor, mountPath: /etc/grafana/provisioning/dashboards }
+            - { name: dashboards, mountPath: /var/lib/grafana/dashboards }
+          readinessProbe:
+            httpGet: { path: /api/health, port: 3000 }
+            initialDelaySeconds: 10
+      volumes:
+        - name: datasources
+          configMap: { name: grafana-datasources }
+        - name: proveedor
+          configMap: { name: grafana-proveedor-dashboards }
+        # Este ConfigMap lo genera scripts/desplegar-observabilidad.sh a partir del
+        # MISMO archivo que usa Compose, para no tener dos copias del dashboard que
+        # se desincronicen.
+        - name: dashboards
+          configMap: { name: grafana-dashboards }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: observabilidad
+spec:
+  type: NodePort
+  selector: { app: grafana }
+  ports:
+    - port: 3000
+      targetPort: 3000
+      nodePort: 30092

@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: observabilidad
+data:
+  alertmanager.yml: |
+    route:
+      receiver: registro
+      # Agrupa por nombre de alerta y ambiente: si la API empieza a devolver 5xx,
+      # quiero un aviso, no uno por pod.
+      group_by: [alertname, ambiente]
+      group_wait: 10s
+      group_interval: 1m
+      repeat_interval: 1h
+
+    receivers:
+      # Un receptor que no manda nada a ningún sitio, y es honesto decir por qué:
+      # un webhook real necesitaría una URL con credencial, y no voy a poner una
+      # credencial de larga duración en un repositorio público para una práctica.
+      # La alerta se ve igual en la interfaz de Alertmanager y en la de Prometheus,
+      # que es lo que se puede comprobar. En algo real aquí iría Slack, correo o
+      # PagerDuty, con la URL en un Secret del clúster.
+      - name: registro
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  namespace: observabilidad
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: alertmanager }
+  template:
+    metadata:
+      labels: { app: alertmanager }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+      containers:
+        - name: alertmanager
+          image: prom/alertmanager:v0.34.1
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+          ports:
+            - containerPort: 9093
+          resources:
+            requests: { cpu: 10m, memory: 48Mi }
+            limits: { memory: 128Mi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/alertmanager }
+            - { name: datos, mountPath: /alertmanager }
+          readinessProbe:
+            httpGet: { path: /-/ready, port: 9093 }
+            initialDelaySeconds: 5
+      volumes:
+        - name: config
+          configMap: { name: alertmanager-config }
+        - name: datos
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: observabilidad
+spec:
+  type: NodePort
+  selector: { app: alertmanager }
+  ports:
+    - port: 9093
+      targetPort: 9093
+      nodePort: 30093

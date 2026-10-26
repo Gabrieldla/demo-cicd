@@ -1,0 +1,61 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: observabilidad
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 10s
+      # La regla de abajo mira una ventana de un minuto. Si evaluara cada minuto,
+      # en el peor caso tardaría dos en enterarse. Cada 15 s el aviso llega a tiempo
+      # sin recalcular de más.
+      evaluation_interval: 15s
+
+    rule_files:
+      - /etc/prometheus/reglas/*.yml
+
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: ["alertmanager:9093"]
+
+    scrape_configs:
+      # En Compose esto era "targets: [api:3000]", una lista escrita a mano. En
+      # Kubernetes los pods van y vienen con cada despliegue, así que se descubren
+      # por anotación: el Deployment de la API ya trae prometheus.io/scrape,
+      # /port y /path. Añadir una réplica, o desplegar otro servicio con las mismas
+      # anotaciones, no obliga a tocar este archivo.
+      - job_name: pods-anotados
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          # Solo los pods que piden ser leídos.
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          # Se arma ip:puerto con el puerto que diga la anotación.
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          # Etiquetas para poder distinguir STAGING de cualquier otro ambiente en
+          # las consultas. Sin esto, una alerta no sabe decir dónde está el fuego.
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: replace
+            target_label: app
+
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]

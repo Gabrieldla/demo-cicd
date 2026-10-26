@@ -1,0 +1,71 @@
+# Pruebas unitarias de la regla de alerta, con promtool.
+#
+# Una alerta es código, y código sin probar es una suposición. El caso que más me
+# importa no es el obvio (hay errores, salta), es el tercero: sin tráfico, la
+# división es 0/0 y una regla mal escrita se queda callada para siempre o grita
+# sin motivo. Eso no se ve mirando la interfaz de Prometheus un rato.
+#
+# Correr:
+#   docker run --rm -v "$PWD/k8s/observabilidad:/r" -w /r \
+#     --entrypoint promtool prom/prometheus:v3.15.1 \
+#     test rules pruebas-alertas.yml
+
+rule_files:
+  - api.yml
+
+evaluation_interval: 15s
+
+tests:
+  # ─── 1. Caída de la base: el 17 % de las respuestas son 5xx ────────────────────
+  - interval: 10s
+    name: "con 5xx muy por encima del 5 %, la alerta salta despues de un minuto"
+    input_series:
+      - series: 'http_request_duration_seconds_count{status="200",namespace="demo-staging",route="/api/health"}'
+        values: "0+10x40"
+      - series: 'http_request_duration_seconds_count{status="500",namespace="demo-staging",route="/api/mensajes"}'
+        values: "0+2x40"
+    alert_rule_test:
+      # A los 30 s la condicion ya se cumple, pero el "for: 1m" todavia no: la
+      # alerta esta pendiente, no disparada. Eso es lo que evita avisar por un
+      # pico de tres segundos.
+      - eval_time: 30s
+        alertname: TasaDeErrores5xxAlta
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: TasaDeErrores5xxAlta
+        exp_alerts:
+          - exp_labels:
+              severidad: critica
+              ambiente: staging
+            exp_annotations:
+              resumen: "Más del 5 % de las respuestas de la API son 5xx"
+              # El 16.67 % no es un numero elegido: son 0.2 errores/s sobre 1.2
+              # peticiones/s, que es lo que dan las series de arriba. Que la
+              # anotacion traiga el valor real es la mitad de la utilidad de una
+              # alerta: "algo falla" no sirve, "el 17 % falla" si.
+              descripcion: "La tasa de error de la API en STAGING lleva más de un minuto por encima del 5 %. Valor actual: 16.67%."
+              accion: "Mirar si la base de datos responde: kubectl -n demo-staging get pods y kubectl -n demo-staging logs deploy/api"
+
+  # ─── 2. Errores, pero por debajo del umbral ────────────────────────────────────
+  - interval: 10s
+    name: "con un 2 % de 5xx no salta: no todo error es una incidencia"
+    input_series:
+      - series: 'http_request_duration_seconds_count{status="200",namespace="demo-staging",route="/api/mensajes"}'
+        values: "0+49x40"
+      - series: 'http_request_duration_seconds_count{status="500",namespace="demo-staging",route="/api/mensajes"}'
+        values: "0+1x40"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: TasaDeErrores5xxAlta
+        exp_alerts: []
+
+  # ─── 3. El caso que casi se me pasa: sin trafico ───────────────────────────────
+  - interval: 10s
+    name: "sin trafico no salta, aunque la division sea 0/0"
+    input_series:
+      - series: 'http_request_duration_seconds_count{status="200",namespace="demo-staging",route="/api/mensajes"}'
+        values: "0+0x40"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: TasaDeErrores5xxAlta
+        exp_alerts: []

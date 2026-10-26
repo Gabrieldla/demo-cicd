@@ -1,0 +1,37 @@
+# Las reglas de alerta de la API. Este archivo es la UNICA copia: el ConfigMap que
+# Prometheus monta lo genera scripts/desplegar-observabilidad.sh a partir de aqui,
+# y las pruebas de pruebas-alertas.yml leen este mismo archivo. Tener la regla
+# pegada dentro de un ConfigMap y otra vez en las pruebas garantiza que una de las
+# dos se queda vieja.
+groups:
+  - name: api
+    rules:
+      - alert: TasaDeErrores5xxAlta
+        # Más del 5 % de las respuestas son 5xx. Se divide entre el total, no
+        # se cuentan errores a secas: veinte errores con mil peticiones es otra
+        # cosa que veinte con veinticinco.
+        #
+        # El "> 0" del denominador es lo que me costó entender: sin él, cuando
+        # no hay tráfico la división es 0/0 = NaN, la comparación no se cumple
+        # y parece que todo va bien. Pero tampoco quiero que la ausencia de
+        # tráfico dispare nada, así que la condición es explícita: hay
+        # peticiones Y más del 5 % fallan.
+        expr: |
+          sum(rate(http_request_duration_seconds_count{status=~"5..",namespace="demo-staging"}[1m]))
+            /
+          sum(rate(http_request_duration_seconds_count{namespace="demo-staging"}[1m]))
+            > 0.05
+          and
+          sum(rate(http_request_duration_seconds_count{namespace="demo-staging"}[1m])) > 0
+        for: 1m
+        labels:
+          severidad: critica
+          ambiente: staging
+        annotations:
+          resumen: "Más del 5 % de las respuestas de la API son 5xx"
+          descripcion: >-
+            La tasa de error de la API en STAGING lleva más de un minuto
+            por encima del 5 %. Valor actual: {{ $value | humanizePercentage }}.
+          accion: >-
+            Mirar si la base de datos responde: kubectl -n demo-staging get pods
+            y kubectl -n demo-staging logs deploy/api

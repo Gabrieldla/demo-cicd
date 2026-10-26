@@ -1,0 +1,14 @@
+# El estado NO va al repositorio. Guarda los valores de todo lo que Terraform
+# administra, en claro, y este es un repositorio público. Para una sola persona
+# alcanza con tenerlo en local; en un equipo iría en un backend remoto con bloqueo
+# (S3 + DynamoDB, GCS, o Terraform Cloud), porque dos "apply" a la vez sobre el
+# mismo estado local lo corrompen.
+*.tfstate
+*.tfstate.*
+.terraform/
+crash.log
+
+# El .terraform.lock.hcl SI va al repositorio, y a proposito: fija el provider por
+# hash, igual que las acciones del workflow van por SHA. Sin el, dos personas (o la
+# misma en dos momentos) pueden resolver versiones distintas del provider y obtener
+# planes distintos con el mismo codigo.
