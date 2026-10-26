@@ -263,3 +263,19 @@ Así que la actualización **me habría movido de una dependencia parcheada a un
 Lo que no hice, y me lo pensé: forzar `body-parser` 2.4.0 por debajo de express con un `overrides` de npm. Habría funcionado y me habría dejado en express 5 unos días antes, pero a cambio de mantener a mano una excepción dentro de un árbol que no controlo. No lo paga. Se queda en express 4 hasta que express 5 declare `body-parser` ^2.4.0.
 
 **Qué me llevo:** "actualizar" y "estar más seguro" no son la misma cosa, y la única forma de notar la diferencia es que algo mire el resultado final. Si el escaneo estuviera antes de construir, o si confiara en el número de versión, esto habría entrado sin que nadie dijera nada.
+
+---
+
+## Hallazgo 9: el pipeline me ofrecía desplegar hacia atrás
+
+Mezclé varios PR seguidos y se me apilaron **seis runs de `main` esperando aprobación** de STAGING, uno por commit. Mi primera reacción fue que era ruido en la pestaña Actions. No lo era.
+
+La compuerta de STAGING es un botón por run. Con seis esperando, puedo aprobar cualquiera, en cualquier orden, y cada uno despliega **el commit que le toca**. Si los apruebo de arriba abajo, como se leen, el último despliegue que gana es el del commit **más viejo**: el ambiente acaba corriendo código anterior al que ya estaba. Y nada en el pipeline me lo iba a decir, porque cada uno de esos runs es, por separado, perfectamente válido.
+
+Es un fallo del diseño del pipeline, no un error de operación. El job es idempotente, el despliegue es correcto, el smoke test pasa. Lo que falta es que el pipeline sepa que **un despliegue más nuevo invalida la aprobación del anterior**.
+
+Lo arreglé con un grupo de concurrencia por ambiente: un commit nuevo cancela la aprobación pendiente del anterior, así que solo se puede aprobar lo último. Y ahí sí cancelo —a diferencia del grupo del workflow, donde en `main` no toco nada en curso—, porque lo que se cancela es **una espera**, no un trabajo a medias.
+
+Los seis que ya estaban apilados los cancelé a mano: aparecen como *cancelled* en el historial y es deliberado, son despliegues que quedaron obsoletos antes de ocurrir.
+
+**Qué me llevo:** el enunciado me hizo pensar la aprobación manual como una compuerta de seguridad, y lo es. Pero una aprobación es también una cola, y una cola sin orden es una forma elegante de hacer las cosas en el orden equivocado. "Esperando que alguien decida" no es un estado neutro: cuanto más dura, más caras son las decisiones que se pueden tomar mal.
