@@ -224,3 +224,25 @@ Lo quité y `main` volvió a `CLEAN` en el mismo momento.
 **Qué me llevo, que es lo contrario de lo que esperaba:** una regla de protección solo sirve si el check que exige **se publica siempre**. Exigir uno que depende de si otro sistema decide opinar sobre ese commit no endurece la rama, la deja muerta. Y lo descubrí rápido solo porque tenía un PR abierto esperando; si lo hubiera hecho con el repositorio en calma, me habría encontrado `main` inmezclable sin entender por qué.
 
 Así que el problema del hallazgo 8 sigue sin solución automática, y prefiero decirlo a inventarme una: lo que me queda es **saber que ese check existe y mirarlo**. Que es exactamente la clase de respuesta que no me gusta, porque depende de que yo me acuerde.
+
+---
+
+## Lo que pasó cuando Dependabot por fin arrancó
+
+En cuanto el archivo fue válido, Dependabot abrió **ocho PR** en unos minutos. Todas mayores, porque llevaba dos días sin revisar nada.
+
+Lo primero que comprobé fue el `cooldown`, que es la mitad del motivo por el que puse Dependabot. Funcionó, y se ve mejor en lo que **no** propuso: a `vitest` le propuso la **5.0.5 estable**, no la `5.1.0-beta.1` que llevaba siete días publicada. Eso es exactamente lo que quería: enterarme de las versiones nuevas sin ser el primero en instalarlas.
+
+Mezclé cuatro, todas después de pasar los doce jobs: `actions/cache` 4→6, `actions/upload-artifact` 4→7, `vitest` 2→5 y `globals` 15→17. La de `vitest` me importaba más de lo que parece: es el corredor de pruebas, y un salto de tres versiones mayores con **todas las pruebas en verde** es la señal más fuerte que puede dar un pipeline. Si el corredor se hubiera roto, las pruebas no habrían pasado, por definición.
+
+### La que rechacé, y por qué
+
+Dependabot propuso `node:22-alpine` → `node:25-alpine` para la imagen de la API. **Pasó los doce jobs en verde**: lint, SAST, unitarias, integración, las tres imágenes, los tres escaneos de Trivy y el smoke contra el clúster de DEV. La cerré igual.
+
+Node numera las líneas impares como `current`: el 25 no es LTS, el 24 (Krypton) sí, y el 22 (Jod) también. Una imagen que sirve una aplicación tiene que ir sobre una LTS, porque lo que importa no es el número más alto sino hasta cuándo va a recibir parches de seguridad. Y ahí está lo que me hizo pensar: **el pipeline no tiene forma de saber eso**. Trivy mira las vulnerabilidades que hay hoy; ninguna herramienta de las que puse mira cuántos meses de soporte le quedan a la imagen base. Doce jobs en verde y la decisión seguía siendo mala.
+
+Pero quedarme en el 22 tampoco era la respuesta: era la cómoda. El 24 es LTS y es más nuevo. Así que la PR de Dependabot terminó sirviendo igual —demostró que la aplicación es compatible hacia adelante— y la decisión fue subir al **LTS vigente**, con el `NODE_VERSION` del workflow igualado para que las pruebas corran sobre la misma versión que la imagen. Tenerlas distintas es pedir un fallo que solo aparece en producción.
+
+Y le dejé a Dependabot un `ignore` para las líneas impares de Node, con el motivo escrito al lado, para no tener que volver a razonar esto cada vez.
+
+**Qué me llevo:** un pipeline en verde es una condición necesaria para mezclar, no una razón suficiente. Automatiza lo que se puede comprobar; el ciclo de vida de una dependencia no es una de esas cosas. La compuerta que falta ahí sigue siendo una persona leyendo el número de versión.
