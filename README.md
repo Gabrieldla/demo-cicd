@@ -1,4 +1,14 @@
-# demo-cicd: la aplicación base del LAB-04
+# demo-cicd — Gabriel De la Rivera
+
+[![CI/CD](https://github.com/Gabrieldla/demo-cicd/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/Gabrieldla/demo-cicd/actions/workflows/ci-cd.yml)
+
+> 📄 **[Cómo funciona el pipeline →](./PIPELINE.md)**: el diagrama, qué hace cada una de las ocho
+> etapas, qué pasa si falla, las herramientas que cambié y cómo se tratan las vulnerabilidades.
+
+---
+
+## El enunciado original de la plantilla
+
 
 Curso IF-1116, Tópicos de Tecnologías de Información, semestre 2026-II. Semana 06.
 
