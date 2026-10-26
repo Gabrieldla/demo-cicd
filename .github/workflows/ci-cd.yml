@@ -331,34 +331,57 @@ jobs:
     runs-on: self-hosted
     environment:
       name: staging
-      url: http://localhost:30080
+      url: http://localhost:30090
     defaults:
       run:
-        # Mi runner es Windows, y "shell: bash" resuelve al stub de WSL
-        # (WindowsApps\bash.EXE), que falla con "execvpe(/bin/bash): No such file or
-        # directory" porque instalé WSL SIN distribución: la suya la trae Rancher
-        # Desktop. Se apunta al Git Bash real, conservando el -eo pipefail que el
-        # resto del pipeline necesita para que una tubería no oculte un fallo.
-        shell: 'C:\Program Files\Git\bin\bash.exe --noprofile --norc -eo pipefail {0}'
+        # Mi runner es Windows y este es el único job que corre ahí. Con "shell: bash"
+        # el runner resuelve el stub de WSL (WindowsApps\bash.EXE) y el job muere con
+        # "execvpe(/bin/bash): No such file or directory", porque instalé WSL sin
+        # distribución: la suya la trae Rancher Desktop. Dar la ruta absoluta de Git
+        # Bash como shell tampoco sirve: el runner la pasa por un Path.Combine y
+        # revienta con "Second path fragment must not be a drive or UNC name".
+        # powershell es el shell que el runner de Windows resuelve siempre (pwsh no
+        # está instalado). Donde hace falta bash de verdad —los scripts del
+        # repositorio— se invoca el ejecutable de Git Bash a mano, que además
+        # conserva el -eo pipefail que el resto del pipeline necesita.
+        shell: powershell
+    env:
+      GIT_BASH: C:\Program Files\Git\bin\bash.exe
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: echo "PREFIJO=ghcr.io/$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')/demo-cicd" >> "$GITHUB_ENV"
-      - name: Desplegar la misma imagen que pasó por DEV
-        run: scripts/desplegar.sh k8s/overlays/staging "$PREFIJO" "sha-${{ github.sha }}"
-      - name: Esperar el rollout
+      - name: Calcular el prefijo de las imágenes
+        # Se escribe con .NET y no con Out-File porque Windows PowerShell 5.1 le
+        # mete un BOM al principio del archivo, y un BOM pegado a la primera línea
+        # de GITHUB_ENV convierte el nombre de la variable en otro nombre.
         run: |
-          kubectl -n demo-staging rollout status deploy/db  --timeout=180s
-          kubectl -n demo-staging rollout status deploy/api --timeout=180s
-          kubectl -n demo-staging rollout status deploy/web --timeout=180s
+          $propietario = "${{ github.repository_owner }}".ToLower()
+          $utf8 = [System.Text.UTF8Encoding]::new($false)
+          [System.IO.File]::AppendAllText($env:GITHUB_ENV, "PREFIJO=ghcr.io/$propietario/demo-cicd`n", $utf8)
+      - name: Desplegar la misma imagen que pasó por DEV
+        run: |
+          & $env:GIT_BASH -eo pipefail scripts/desplegar.sh k8s/overlays/staging $env:PREFIJO "sha-${{ github.sha }}"
+          exit $LASTEXITCODE
+      - name: Esperar el rollout
+        # PowerShell no corta al primer comando que falla: hay que mirar el código
+        # de salida de cada kubectl, o un rollout caído pasaría por bueno.
+        run: |
+          foreach ($despliegue in "db", "api", "web") {
+            kubectl -n demo-staging rollout status "deploy/$despliegue" --timeout=180s
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - name: Smoke test
-        run: bash scripts/smoke.sh http://localhost:30080
+        run: |
+          & $env:GIT_BASH -eo pipefail scripts/smoke.sh http://localhost:30090
+          exit $LASTEXITCODE
       - name: Resumen del despliegue
         if: always()
         run: |
-          {
-            echo "## STAGING"
-            echo ""
-            echo "- URL: http://localhost:30080"
-            echo "- Imágenes: \`sha-${{ github.sha }}\`"
-            echo "- Aprobado por: @${{ github.actor }}"
-          } >> "$GITHUB_STEP_SUMMARY"
+          $lineas = @(
+            '## STAGING',
+            '',
+            '- URL: http://localhost:30090',
+            '- Imágenes: `sha-${{ github.sha }}`',
+            '- Aprobado por: @${{ github.actor }}'
+          ) -join "`n"
+          $utf8 = [System.Text.UTF8Encoding]::new($false)
+          [System.IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, "$lineas`n", $utf8)
