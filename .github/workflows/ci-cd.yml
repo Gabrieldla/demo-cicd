@@ -20,6 +20,15 @@ on:
 permissions:
   contents: read
 
+# El shell por defecto de Actions es "bash -e", SIN pipefail: en una tubería solo
+# cuenta el código de salida del ÚLTIMO comando. Por eso un paso como
+# "npm test | tee salida.txt" quedaba en verde aunque las pruebas fallaran, y la
+# compuerta de pruebas dejaba de existir sin que nadie se enterara.
+# Declarando "shell: bash", Actions usa "bash --noprofile --norc -eo pipefail".
+defaults:
+  run:
+    shell: bash
+
 env:
   NODE_VERSION: "22"
 
@@ -53,20 +62,36 @@ jobs:
       - name: Semgrep, análisis estático del código
         run: >
           docker run --rm -v "$PWD:/src:ro" semgrep/semgrep:1.180.0
-          semgrep scan --config p/ci --config p/dockerfile --error --metrics=off /src
+          semgrep scan --config p/ci --config p/dockerfile --config p/javascript
+          --error --metrics=off /src
       # B2, cambio 1: TruffleHog en lugar de Gitleaks. Los dos recorren el historial
       # de Git buscando secretos; la diferencia es que TruffleHog además VERIFICA si
       # la credencial sigue viva contra el servicio que la emitió. Eso separa un
       # secreto real y explotable de una cadena que solo parece una llave.
       # --fail devuelve código distinto de cero cuando encuentra algo: la etapa frena.
+      # TruffleHog, por defecto, recorre TODAS las ramas del repositorio. Suena
+      # mejor y en este repositorio deja la compuerta inservible: las ramas
+      # romper/* se quedan abiertas a propósito y una lleva un secreto a
+      # propósito, así que el escaneo completo sale en rojo SIEMPRE, en
+      # cualquier rama. Una compuerta que no puede ponerse verde no frena nada:
+      # se desactiva o se ignora, y acaba siendo peor que no tenerla.
+      # Se escanea el historial alcanzable desde lo que se va a mezclar, que es
+      # la pregunta que esta compuerta tiene que responder. Que un secreto en
+      # otra rama siga estando filtrado es cierto, y se arregla rotándolo, no
+      # dejando el pipeline en rojo para siempre.
       - name: TruffleHog, secretos en el historial de Git
-        run: >
-          docker run --rm -v "$PWD:/repo:ro" trufflesecurity/trufflehog:3.99.7
-          git file:///repo --no-update --fail --results=verified,unknown
+        run: |
+          # "escaneo" apunta a lo que se va a mezclar: en un PR, la rama ya unida
+          # contra main; en main, main. HEAD queda suelto y --branch pide un nombre.
+          git branch -f escaneo HEAD
+          docker run --rm -v "$PWD:/repo:ro" trufflesecurity/trufflehog:3.99.7 \
+            git file:///repo --no-update --fail --results=verified,unknown --branch escaneo
 
   test-unit:
     name: 3. Pruebas unitarias y del sitio
-    needs: lint
+    # B6: antes esperaba a lint. Un error de estilo no invalida una prueba, y una
+    # prueba rota no se arregla formateando: son compuertas independientes. Las dos
+    # siguen siendo obligatorias para mezclar, pero ya no en fila india.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -117,7 +142,11 @@ jobs:
 
   package:
     name: 5. Empaquetar y publicar (${{ matrix.servicio }})
-    needs: [test-integration, sast]
+    # B6: antes esperaba a test-integration (39 s en el camino crítico). Publicar una
+    # imagen no es desplegarla: si la integración falla, la compuerta de DEV lo frena
+    # igual, porque deploy-dev necesita a las dos. Lo único que se pierde si falla es
+    # una imagen publicada que nadie usa.
+    needs: sast
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -164,7 +193,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Nombre de la imagen
-        run: echo "IMAGEN=ghcr.io/$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')/demo-cicd-${{ matrix.servicio }}" >> "$GITHUB_ENV"
+        run: |
+          echo "IMAGEN=ghcr.io/$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')/demo-cicd-${{ matrix.servicio }}" >> "$GITHUB_ENV"
+          echo "TRIVY_CACHE_DIR=${GITHUB_WORKSPACE}/.cache/trivy" >> "$GITHUB_ENV"
+      # B6: la base de datos de vulnerabilidades pesa cientos de MB y Trivy la
+      # descarga en cada job. Se guarda entre runs, con una clave por servicio.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ github.workspace }}/.cache/trivy
+          key: trivy-db-${{ matrix.servicio }}-${{ github.run_id }}
+          restore-keys: trivy-db-${{ matrix.servicio }}-
       # Informe completo, para el resumen del run. No decide: solo cuenta.
       - name: Trivy, informe en JSON
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -208,7 +246,9 @@ jobs:
 
   deploy-dev:
     name: 7. Deploy DEV (efímero) y smoke
-    needs: security
+    # La compuerta sigue entera: nada llega a DEV sin que pasen el escaneo Y las
+    # pruebas de integración. Adelantar trabajo no es saltarse un control.
+    needs: [security, test-integration]
     if: github.event_name != 'pull_request' # un PR nunca despliega
     runs-on: ubuntu-latest
     environment: dev
@@ -230,10 +270,17 @@ jobs:
       # en STAGING. Así DEV y STAGING comparten distribución y lo que pasa en uno
       # predice lo que pasa en el otro. Además arranca más rápido, porque k3s trae
       # menos componentes.
+      # La acción AbsaOSS/k3d-action@v2.4.0 falla: descarga una versión de k3d que ya
+      # no existe y devuelve 404. Se instala el binario directamente, con la versión
+      # fija: mismo criterio que fijar las acciones por SHA, y sin ejecutar un script
+      # remoto con "curl | bash", que es justo el patrón de ataque a la cadena de
+      # suministro que el Reto 4 del LAB-03 me hizo estudiar.
       - name: Crear el clúster (k3d)
-        uses: AbsaOSS/k3d-action@ad80fda285ceeca9b1ebef8c4b3f862f8b9124b4 # v2.4.0
-        with:
-          cluster-name: dev
+        run: |
+          curl -sSLf -o /tmp/k3d https://github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-linux-amd64
+          sudo install -m 0755 /tmp/k3d /usr/local/bin/k3d
+          k3d version
+          k3d cluster create dev --wait
       - name: Namespace y secretos
         run: |
           kubectl create namespace demo-dev
@@ -253,6 +300,20 @@ jobs:
           sleep 3
           bash scripts/smoke.sh http://localhost:8080
           APP_URL=http://localhost:8080 npm run test:integration
+      # Reto 1: DAST. El SAST revisa el código quieto; esto ataca la aplicación
+      # corriendo. Aprovecha que DEV ya está levantado dentro de este mismo runner.
+      - name: DAST con OWASP ZAP contra DEV
+        run: |
+          mkdir -p zap-salida && chmod 777 zap-salida
+          docker run --rm --network host             -v "$PWD/zap-salida:/zap/wrk:rw" -v "$PWD/.zap:/zap/conf:ro"             ghcr.io/zaproxy/zaproxy:2.16.1             zap-baseline.py -t http://localhost:8080             -r informe-zap.html -c /zap/conf/rules.tsv
+
+      - name: Guardar el informe de ZAP
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: informe-zap
+          path: zap-salida/
+
       - name: Diagnóstico (solo si algo falló)
         if: failure()
         run: |
@@ -270,29 +331,57 @@ jobs:
     runs-on: self-hosted
     environment:
       name: staging
-      url: http://localhost:30080
+      url: http://localhost:30090
     defaults:
       run:
-        shell: bash
+        # Mi runner es Windows y este es el único job que corre ahí. Con "shell: bash"
+        # el runner resuelve el stub de WSL (WindowsApps\bash.EXE) y el job muere con
+        # "execvpe(/bin/bash): No such file or directory", porque instalé WSL sin
+        # distribución: la suya la trae Rancher Desktop. Dar la ruta absoluta de Git
+        # Bash como shell tampoco sirve: el runner la pasa por un Path.Combine y
+        # revienta con "Second path fragment must not be a drive or UNC name".
+        # powershell es el shell que el runner de Windows resuelve siempre (pwsh no
+        # está instalado). Donde hace falta bash de verdad —los scripts del
+        # repositorio— se invoca el ejecutable de Git Bash a mano, que además
+        # conserva el -eo pipefail que el resto del pipeline necesita.
+        shell: powershell
+    env:
+      GIT_BASH: C:\Program Files\Git\bin\bash.exe
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: echo "PREFIJO=ghcr.io/$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')/demo-cicd" >> "$GITHUB_ENV"
-      - name: Desplegar la misma imagen que pasó por DEV
-        run: scripts/desplegar.sh k8s/overlays/staging "$PREFIJO" "sha-${{ github.sha }}"
-      - name: Esperar el rollout
+      - name: Calcular el prefijo de las imágenes
+        # Se escribe con .NET y no con Out-File porque Windows PowerShell 5.1 le
+        # mete un BOM al principio del archivo, y un BOM pegado a la primera línea
+        # de GITHUB_ENV convierte el nombre de la variable en otro nombre.
         run: |
-          kubectl -n demo-staging rollout status deploy/db  --timeout=180s
-          kubectl -n demo-staging rollout status deploy/api --timeout=180s
-          kubectl -n demo-staging rollout status deploy/web --timeout=180s
+          $propietario = "${{ github.repository_owner }}".ToLower()
+          $utf8 = [System.Text.UTF8Encoding]::new($false)
+          [System.IO.File]::AppendAllText($env:GITHUB_ENV, "PREFIJO=ghcr.io/$propietario/demo-cicd`n", $utf8)
+      - name: Desplegar la misma imagen que pasó por DEV
+        run: |
+          & $env:GIT_BASH -eo pipefail scripts/desplegar.sh k8s/overlays/staging $env:PREFIJO "sha-${{ github.sha }}"
+          exit $LASTEXITCODE
+      - name: Esperar el rollout
+        # PowerShell no corta al primer comando que falla: hay que mirar el código
+        # de salida de cada kubectl, o un rollout caído pasaría por bueno.
+        run: |
+          foreach ($despliegue in "db", "api", "web") {
+            kubectl -n demo-staging rollout status "deploy/$despliegue" --timeout=180s
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - name: Smoke test
-        run: bash scripts/smoke.sh http://localhost:30080
+        run: |
+          & $env:GIT_BASH -eo pipefail scripts/smoke.sh http://localhost:30090
+          exit $LASTEXITCODE
       - name: Resumen del despliegue
         if: always()
         run: |
-          {
-            echo "## STAGING"
-            echo ""
-            echo "- URL: http://localhost:30080"
-            echo "- Imágenes: \`sha-${{ github.sha }}\`"
-            echo "- Aprobado por: @${{ github.actor }}"
-          } >> "$GITHUB_STEP_SUMMARY"
+          $lineas = @(
+            '## STAGING',
+            '',
+            '- URL: http://localhost:30090',
+            '- Imágenes: `sha-${{ github.sha }}`',
+            '- Aprobado por: @${{ github.actor }}'
+          ) -join "`n"
+          $utf8 = [System.Text.UTF8Encoding]::new($false)
+          [System.IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, "$lineas`n", $utf8)

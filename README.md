@@ -1,4 +1,14 @@
-# demo-cicd: la aplicación base del LAB-04
+# demo-cicd — Gabriel De la Rivera
+
+[![CI/CD](https://github.com/Gabrieldla/demo-cicd/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/Gabrieldla/demo-cicd/actions/workflows/ci-cd.yml)
+
+> 📄 **[Cómo funciona el pipeline →](./PIPELINE.md)**: el diagrama, qué hace cada una de las ocho
+> etapas, qué pasa si falla, las herramientas que cambié y cómo se tratan las vulnerabilidades.
+
+---
+
+## El enunciado original de la plantilla
+
 
 Curso IF-1116, Tópicos de Tecnologías de Información, semestre 2026-II. Semana 06.
 
@@ -32,7 +42,7 @@ scripts/
 k8s/
     base/               Deployments, Services, ConfigMap y PVC
     overlays/dev/       namespace demo-dev
-    overlays/staging/   namespace demo-staging, web por NodePort 30080, dos réplicas de api
+    overlays/staging/   namespace demo-staging, web por NodePort 30090, dos réplicas de api
 observabilidad/         Prometheus y Grafana con un dashboard RED ya armado
 compose.yaml            la aplicación en su máquina, con perfil opcional de observabilidad
 .devcontainer/          para que todo arranque solo en GitHub Codespaces
@@ -63,7 +73,7 @@ npm run lint                    # ESLint sobre el JavaScript, HTMLHint sobre el 
 npm run test:unit               # 9 pruebas, sin base de datos, en menos de un segundo
 npm run test:site               # 6 pruebas sobre web/public
 npm run test:integration        # 6 pruebas contra http://localhost:8080 (la app tiene que estar levantada)
-APP_URL=http://localhost:30080 npm run test:integration   # las mismas, contra otro ambiente
+APP_URL=http://localhost:30090 npm run test:integration   # las mismas, contra otro ambiente
 bash scripts/smoke.sh http://localhost:8080
 ```
 
@@ -93,7 +103,7 @@ kubectl create namespace demo-staging
 kubectl -n demo-staging create secret generic db-credenciales --from-literal=DB_PASSWORD="$(openssl rand -hex 16)"
 scripts/desplegar.sh k8s/overlays/staging ghcr.io/<usuario>/demo-cicd sha-<commit>
 kubectl -n demo-staging rollout status deploy/web deploy/api deploy/db
-open http://localhost:30080
+open http://localhost:30090
 ```
 
 El Secret `db-credenciales` se crea **en el clúster**, una sola vez. No está en el repositorio ni lo crea el pipeline de staging. Los pods llevan `imagePullSecrets: ghcr`: si sus paquetes son públicos, ese Secret no hace falta y Kubernetes lo ignora; si son privados, créenlo con un token que tenga `read:packages`.
