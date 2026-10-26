@@ -62,7 +62,8 @@ jobs:
       - name: Semgrep, análisis estático del código
         run: >
           docker run --rm -v "$PWD:/src:ro" semgrep/semgrep:1.180.0
-          semgrep scan --config p/ci --config p/dockerfile --error --metrics=off /src
+          semgrep scan --config p/ci --config p/dockerfile --config p/javascript
+          --error --metrics=off /src
       # B2, cambio 1: TruffleHog en lugar de Gitleaks. Los dos recorren el historial
       # de Git buscando secretos; la diferencia es que TruffleHog además VERIFICA si
       # la credencial sigue viva contra el servicio que la emitió. Eso separa un
