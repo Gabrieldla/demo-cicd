@@ -44,7 +44,7 @@ jobs:
           failure-threshold: warning
 
   sast:
-    name: 2. SAST (Semgrep) y secretos (Gitleaks)
+    name: 2. SAST (Semgrep) y secretos (TruffleHog)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -54,10 +54,15 @@ jobs:
         run: >
           docker run --rm -v "$PWD:/src:ro" semgrep/semgrep:1.180.0
           semgrep scan --config p/ci --config p/dockerfile --error --metrics=off /src
-      - name: Gitleaks, secretos en el historial de Git
+      # B2, cambio 1: TruffleHog en lugar de Gitleaks. Los dos recorren el historial
+      # de Git buscando secretos; la diferencia es que TruffleHog además VERIFICA si
+      # la credencial sigue viva contra el servicio que la emitió. Eso separa un
+      # secreto real y explotable de una cadena que solo parece una llave.
+      # --fail devuelve código distinto de cero cuando encuentra algo: la etapa frena.
+      - name: TruffleHog, secretos en el historial de Git
         run: >
-          docker run --rm -v "$PWD:/repo:ro" --entrypoint sh ghcr.io/gitleaks/gitleaks:v8.30.1
-          -c "git config --global --add safe.directory /repo && gitleaks git /repo --redact -v --exit-code 1"
+          docker run --rm -v "$PWD:/repo:ro" trufflesecurity/trufflehog:3.99.7
+          git file:///repo --no-update --fail --results=verified,unknown
 
   test-unit:
     name: 3. Pruebas unitarias y del sitio
@@ -219,10 +224,16 @@ jobs:
       - run: npm ci
       - run: echo "PREFIJO=ghcr.io/$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')/demo-cicd" >> "$GITHUB_ENV"
       # Un clúster que nace y muere con este job: eso es un ambiente efímero.
-      - name: Crear el clúster (kind)
-        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+      #
+      # B2, cambio 2: k3d en lugar de kind. kind levanta Kubernetes "vanilla"; k3d
+      # levanta k3s, que es exactamente la distribución que corre mi Rancher Desktop
+      # en STAGING. Así DEV y STAGING comparten distribución y lo que pasa en uno
+      # predice lo que pasa en el otro. Además arranca más rápido, porque k3s trae
+      # menos componentes.
+      - name: Crear el clúster (k3d)
+        uses: AbsaOSS/k3d-action@ad80fda285ceeca9b1ebef8c4b3f862f8b9124b4 # v2.4.0
         with:
-          cluster_name: dev
+          cluster-name: dev
       - name: Namespace y secretos
         run: |
           kubectl create namespace demo-dev
