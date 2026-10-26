@@ -44,7 +44,7 @@ flowchart LR
 Hay dos compuertas. La **técnica**: `main` está protegida con diez checks obligatorios, así que un PR en rojo no se puede mezclar. Y la **humana**: `deploy-staging` usa el environment `staging` con *Required reviewers*, y el job espera hasta que apruebo. Eso es Continuous **Delivery**; para convertirlo en Continuous Deployment bastaría quitar esa regla, sin tocar el workflow.
 
 > 📄 **[Más detalle en PIPELINE.md →](./PIPELINE.md)**: por qué se construye una sola vez, las herramientas que cambié y cómo se tratan las vulnerabilidades.
-> 📓 **[Bitácora de decisiones →](./BITACORA.md)**: los siete hallazgos, lo que no funcionó y por qué.
+> 📓 **[Bitácora de decisiones →](./BITACORA.md)**: los ocho hallazgos, lo que no funcionó y por qué.
 
 ---
 
