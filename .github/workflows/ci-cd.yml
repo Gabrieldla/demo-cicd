@@ -69,10 +69,23 @@ jobs:
       # la credencial sigue viva contra el servicio que la emitió. Eso separa un
       # secreto real y explotable de una cadena que solo parece una llave.
       # --fail devuelve código distinto de cero cuando encuentra algo: la etapa frena.
+      # TruffleHog, por defecto, recorre TODAS las ramas del repositorio. Suena
+      # mejor y en este repositorio deja la compuerta inservible: las ramas
+      # romper/* se quedan abiertas a propósito y una lleva un secreto a
+      # propósito, así que el escaneo completo sale en rojo SIEMPRE, en
+      # cualquier rama. Una compuerta que no puede ponerse verde no frena nada:
+      # se desactiva o se ignora, y acaba siendo peor que no tenerla.
+      # Se escanea el historial alcanzable desde lo que se va a mezclar, que es
+      # la pregunta que esta compuerta tiene que responder. Que un secreto en
+      # otra rama siga estando filtrado es cierto, y se arregla rotándolo, no
+      # dejando el pipeline en rojo para siempre.
       - name: TruffleHog, secretos en el historial de Git
-        run: >
-          docker run --rm -v "$PWD:/repo:ro" trufflesecurity/trufflehog:3.99.7
-          git file:///repo --no-update --fail --results=verified,unknown
+        run: |
+          # "escaneo" apunta a lo que se va a mezclar: en un PR, la rama ya unida
+          # contra main; en main, main. HEAD queda suelto y --branch pide un nombre.
+          git branch -f escaneo HEAD
+          docker run --rm -v "$PWD:/repo:ro" trufflesecurity/trufflehog:3.99.7 \
+            git file:///repo --no-update --fail --results=verified,unknown --branch escaneo
 
   test-unit:
     name: 3. Pruebas unitarias y del sitio
