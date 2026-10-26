@@ -1,6 +1,7 @@
 # web: nginx sirviendo la página y reenviando /api/ al backend.
 # Imagen "unprivileged": corre como usuario nginx (uid 101) y escucha en 8080.
-FROM nginxinc/nginx-unprivileged:1.25-alpine  # roto a propósito: versión vieja
+# Roto a propósito: versión vieja de la imagen base, sin apk upgrade.
+FROM nginxinc/nginx-unprivileged:1.25-alpine
 
 # La imagen base arrastra 45 vulnerabilidades HIGH con parche disponible (curl,
 # c-ares, brotli, libxml2...). apk upgrade las lleva a la versión corregida del
