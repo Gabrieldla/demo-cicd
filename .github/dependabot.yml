@@ -35,3 +35,9 @@ updates:
       interval: daily
     cooldown:
       default-days: 7
+    ignore:
+      # Node numera las lineas impares como "current": soporte corto y sin LTS.
+      # Una imagen que sirve una aplicacion tiene que ir sobre una LTS, asi que
+      # estas no se proponen. Las pares siguen llegando.
+      - dependency-name: node
+        versions: ["23.x", "25.x", "27.x", "29.x"]
