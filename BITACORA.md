@@ -207,8 +207,20 @@ for the package ecosystem 'github-actions'.
 Los `semver-*-days` solo valen para ecosistemas con semver de verdad, y las acciones de GitHub no lo son. Pero lo grave no es el error, son sus dos consecuencias:
 
 1. **Dependabot no se queja a medias: rechaza el archivo completo.** Un error en el bloque de `github-actions` dejó sin revisar también `npm` y `docker`, que tenían su `cooldown` bien puesto. Tres ecosistemas apagados por una línea.
-2. **El check que lo decía no era obligatorio.** Se llama `.github/dependabot.yml`, sale en los PR, y **no estaba** entre los diez checks que protegen `main`. Llevaba dos días en rojo mientras el resto salía en verde y yo seguía mezclando. Lo vi de casualidad. Ahora es el undécimo check obligatorio, que es la única forma de que esto no me vuelva a pasar.
+2. **El check que lo decía no era obligatorio.** Se llama `.github/dependabot.yml`, sale en los PR, y no está entre los diez checks que protegen `main`. Llevaba dos días en rojo mientras el resto salía en verde y yo seguía mezclando. Lo vi de casualidad.
 
 **Qué me llevo:** es la tercera vez en este laboratorio que me pasa lo mismo —la tubería sin `pipefail`, el Semgrep con 38 reglas, y ahora esto—, y por eso lo escribo como una sola lección: **tener la herramienta configurada no es tenerla funcionando, y un pipeline verde no demuestra que lo esté**. Las tres veces el sistema estaba dando señales; dos de ellas solo aparecieron cuando rompí algo a propósito, y la tercera estaba escrita en un check que nunca había abierto porque no me frenaba nada.
 
 Lo que yo hubiera querido es que fallara. Un check que avisa pero no bloquea acaba siendo decoración: si no frena, no se lee.
+
+### Lo que intenté después, y por qué lo deshice
+
+La conclusión de arriba pedía una acción, así que la hice: agregué `.github/dependabot.yml` a los checks obligatorios de `main`, para que un archivo inválido frenara un merge en vez de avisar en voz baja.
+
+**Bloqueó `main` por completo.** Ese check no lo publica mi workflow, lo publica Dependabot, y no aparece en todos los PR: en el siguiente, con los diez checks del pipeline en verde, GitHub lo dejó en `BLOCKED` esperando un contexto que nunca iba a llegar. Lo comprobé pidiendo los `check-runs` del commit: el de Dependabot no estaba.
+
+Lo quité y `main` volvió a `CLEAN` en el mismo momento.
+
+**Qué me llevo, que es lo contrario de lo que esperaba:** una regla de protección solo sirve si el check que exige **se publica siempre**. Exigir uno que depende de si otro sistema decide opinar sobre ese commit no endurece la rama, la deja muerta. Y lo descubrí rápido solo porque tenía un PR abierto esperando; si lo hubiera hecho con el repositorio en calma, me habría encontrado `main` inmezclable sin entender por qué.
+
+Así que el problema del hallazgo 8 sigue sin solución automática, y prefiero decirlo a inventarme una: lo que me queda es **saber que ese check existe y mirarlo**. Que es exactamente la clase de respuesta que no me gusta, porque depende de que yo me acuerde.
