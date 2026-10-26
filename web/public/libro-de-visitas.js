@@ -50,12 +50,29 @@ form.addEventListener("submit", async (e) => {
     form.reset();
     estado.textContent = "¡Gracias por tu mensaje!";
     await cargar();
+    await mostrarTotal();
   } catch (err) {
     estado.textContent = `No se pudo enviar: ${err.message}`;
   }
 });
 
+// El total sale de /api/estadisticas, no de contar la lista: la lista está limitada
+// a 100 mensajes, así que contarla daría un número equivocado en cuanto haya más.
+async function mostrarTotal() {
+  const el = document.getElementById("total-mensajes");
+  if (!el) return;
+  try {
+    const r = await fetch(`${API}/estadisticas`, { headers: { Accept: "application/json" } });
+    if (!r.ok) return;
+    const { total } = await r.json();
+    el.textContent = total === 1 ? "(1 mensaje)" : `(${total} mensajes)`;
+  } catch {
+    // Si falla, la sección se queda sin el contador y el resto sigue funcionando.
+  }
+}
+
 // Degradación elegante: la sección solo aparece si el backend contesta.
 cargar()
+  .then(mostrarTotal)
   .then(() => { seccion.hidden = false; })
   .catch((err) => console.info("Libro de visitas oculto:", err.message));
