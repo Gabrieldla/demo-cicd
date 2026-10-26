@@ -2,12 +2,19 @@
 # publica un parche de seguridad, nadie se entera. Dependabot abre un PR con el SHA
 # nuevo. El cooldown evita saltar a una versión recién publicada, que es justo el
 # escenario del ataque a tj-actions/changed-files en 2025.
+#
+# La revisión es DIARIA, no semanal. Parece lo contrario de prudente y no lo es: lo
+# peligroso no es enterarse pronto de una versión nueva, es instalarla el día que
+# sale. De eso se encarga el cooldown, que no deja proponer nada antes de que lleve
+# unos días publicado. Con las dos cosas juntas me entero rápido de un parche que ya
+# estuvo expuesto al escrutinio de otros, que es exactamente lo que quiero. Con
+# "weekly" el aviso puede tardar casi una semana de más, sumado al cooldown.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: daily
     cooldown:
       default-days: 7
       semver-major-days: 14
@@ -18,13 +25,13 @@ updates:
   - package-ecosystem: npm
     directories: ["/", "/api"]
     schedule:
-      interval: weekly
+      interval: daily
     cooldown:
       default-days: 7
 
   - package-ecosystem: docker
     directories: ["/web", "/api", "/db"]
     schedule:
-      interval: weekly
+      interval: daily
     cooldown:
       default-days: 7
