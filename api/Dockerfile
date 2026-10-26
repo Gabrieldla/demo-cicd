@@ -1,6 +1,10 @@
 # api: Node.js con Express. Sigue las seis reglas del LAB-02:
 # tag fijo, dependencias antes que código, sin root, sin secretos, imagen chica, un proceso.
-FROM node:22-alpine
+# Node 24 es el LTS vigente (Krypton). Dependabot propuso el 25 y su PR paso los
+# doce jobs en verde, pero el 25 es linea "current": deja de recibir parches
+# mucho antes. Que las pruebas pasen dice que el codigo es compatible, no que la
+# version sea una buena base para servir algo.
+FROM node:24-alpine
 
 # Parchea los paquetes del sistema de la imagen base antes de instalar nada.
 # Se hace aquí, como root, porque más abajo el contenedor baja al uid 1000.
