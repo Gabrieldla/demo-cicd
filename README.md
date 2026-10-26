@@ -153,17 +153,17 @@ El Secret `db-credenciales` se crea **en el clúster**, una sola vez. No está e
 
 Cinco ramas rompen el pipeline una etapa cada vez, para comprobar que cada compuerta frena de verdad y para medir cuánto cuesta enterarse tarde. Las cuatro primeras son las que pide el B3; la quinta la agregué para probar la herramienta nueva del B2. Las ramas y sus PR quedan abiertas a propósito: son la evidencia, no cambios que quiera integrar.
 
-| # | Rama / PR | Qué rompí | Etapa que lo detuvo | Tiempo hasta el fallo | Run |
-|---|---|---|---|---|---|
-| 1 | [`romper/1-lint`](../../pull/4) | `api/roto.js` declara una variable que nunca usa (`no-unused-vars`) | 1. Lint | **23 s** | [40248526621](../../actions/runs/40248526621) |
-| 2 | [`romper/2-sast`](../../pull/5) | una ruta de Express que hace `eval(req.query.expresion)` | 2. SAST (Semgrep) | **20 s** | [40258084332](../../actions/runs/40258084332) |
-| 3 | [`romper/3-pruebas`](../../pull/6) | `GET /api/estadisticas` devuelve el total como texto, no como número | 3. Pruebas unitarias | **31 s** | [40249321314](../../actions/runs/40249321314) |
-| 4 | [`romper/4-seguridad`](../../pull/7) | `web/Dockerfile` vuelve a `nginx:1.25-alpine` y quita el `apk upgrade`: 45 HIGH con parche | 6. Escaneo de imagen | **147 s** | [40249853149](../../actions/runs/40249853149) |
-| 5 | [`romper/5-secreto`](../../pull/16) | la contraseña de Postgres escrita en `api/server.js` | 2. Secretos (TruffleHog) | **23 s** | [40260425572](../../actions/runs/40260425572) |
+| # | Rama / PR | Qué rompí | Etapa que lo detuvo | Tiempo hasta el fallo | Rojo | Verde |
+|---|---|---|---|---|---|---|
+| 1 | [`romper/1-lint`](../../pull/4) | `api/roto.js` declara una variable que nunca usa (`no-unused-vars`) | 1. Lint | **23 s** | [40248526621](../../actions/runs/40248526621) | [40262746919](../../actions/runs/40262746919) |
+| 2 | [`romper/2-sast`](../../pull/5) | una ruta de Express que hace `eval(req.query.expresion)` | 2. SAST (Semgrep) | **20 s** | [40258084332](../../actions/runs/40258084332) | [40262747886](../../actions/runs/40262747886) |
+| 3 | [`romper/3-pruebas`](../../pull/6) | `GET /api/estadisticas` devuelve el total como texto, no como número | 3. Pruebas unitarias | **31 s** | [40249321314](../../actions/runs/40249321314) | [40262770585](../../actions/runs/40262770585) |
+| 4 | [`romper/4-seguridad`](../../pull/7) | `web/Dockerfile` vuelve a `nginx:1.25-alpine` y quita el `apk upgrade`: 45 HIGH con parche | 6. Escaneo de imagen | **147 s** | [40249853149](../../actions/runs/40249853149) | [40262775171](../../actions/runs/40262775171) |
+| 5 | [`romper/5-secreto`](../../pull/16) | la contraseña de Postgres escrita en `api/server.js` | 2. Secretos (TruffleHog) | **23 s** | [40260425572](../../actions/runs/40260425572) | **no hay** |
 
-Lo que importa es la última columna. El mismo tipo de descuido humano cuesta **23 segundos** si lo agarra el lint y **147 segundos** —seis veces más— si hay que construir y publicar tres imágenes antes de que Trivy pueda mirarlas. Por eso el pipeline va de lo barato a lo caro, y no al revés.
+Lo que importa es la columna del tiempo. El mismo tipo de descuido humano cuesta **23 segundos** si lo agarra el lint y **147 segundos** —seis veces más— si hay que construir y publicar tres imágenes antes de que Trivy pueda mirarlas. Por eso el pipeline va de lo barato a lo caro, y no al revés.
 
-La rotura 5 es distinta a propósito: el código **funciona perfectamente**, no hay error de sintaxis ni prueba que falle. Lo único mal es que hay una credencial en el repositorio, y el pipeline lo frena igual.
+La rotura 5 es distinta a propósito, en dos cosas. Primero, el código **funciona perfectamente**: no hay error de sintaxis ni prueba que falle, lo único mal es que hay una credencial en el repositorio, y el pipeline lo frena igual. Y segundo, es la única que **no tiene run en verde**, porque un secreto no se arregla con un commit encima: sigue en el historial de la rama. Eso no es un detalle del laboratorio, es la razón por la que a una credencial filtrada se le responde rotándola y no borrándola.
 
 Dos de estas roturas no se detuvieron donde debían, y ahí está lo que de verdad aprendí:
 
