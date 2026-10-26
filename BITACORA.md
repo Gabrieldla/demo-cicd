@@ -63,3 +63,57 @@ Es lo que el enunciado quería que viera, y los números lo dicen solos: un erro
 - **Lo que acepté, una por una, en `.zap/rules.tsv`:** Cache-Control en respuestas JSON dinámicas de la API; Permissions-Policy, porque la aplicación no usa cámara, micrófono ni geolocalización; Timestamp Disclosure, porque las "marcas de tiempo" que ZAP detecta son las fechas de publicación de los mensajes, que son públicas por diseño; y la alerta informativa de aplicación moderna.
 - **Cómo lo verifiqué:** antes de subirlo, levanté la aplicación en local y corrí el mismo contenedor de ZAP: termina con código 0 y `curl -D-` muestra las cuatro cabeceras.
 - **Qué aprendí:** la `Content-Security-Policy` fue la única que costó. La primera versión rompía la página porque el HTML trae un `<style>` en línea, y la política lo bloqueaba. Hubo que permitir `'unsafe-inline'` **solo para estilos**, dejando el JavaScript restringido a archivos propios. Es un buen ejemplo de que una cabecera de seguridad mal puesta rompe la aplicación en silencio.
+
+---
+
+## Hallazgo 4: el SAST no busca `eval`, busca `eval` alimentado por el usuario
+
+Al preparar la rotura del SAST escribí esto, convencido de que cualquier escáner lo marcaría:
+
+```js
+export function calcular(expresionDelUsuario) {
+  return eval(expresionDelUsuario);
+}
+```
+
+Pasó limpio. Y no solo con la configuración de la guía: probé en local `p/javascript`, `p/security-audit` y `p/owasp-top-ten`, y **ninguna** lo reportó.
+
+La razón es que las reglas serias de Semgrep son de **análisis de contaminación** (*taint analysis*): no buscan una función peligrosa suelta, buscan un camino desde una **fuente no confiable** hasta un **destino peligroso**. Un parámetro de función no es una fuente reconocida; podría venir de cualquier parte, incluso de código propio.
+
+Cuando reescribí la rotura como lo que de verdad sería una vulnerabilidad —una ruta de Express que evalúa lo que llega en la URL— saltó de inmediato:
+
+```js
+rutasInseguras.get("/api/calcular", (req, res) => {
+  const resultado = eval(req.query.expresion);   // ← p/javascript: code-string-concat
+  res.json({ resultado });
+});
+```
+
+**Qué me llevo:** un SAST que no reporta nada puede significar dos cosas muy distintas: que el código está limpio, o que le estoy dando a probar algo que no se parece a una vulnerabilidad real. La única forma de saber cuál de las dos es, es meterle una vulnerabilidad de verdad y comprobar que la encuentra. Un escáner sin probar es una suposición.
+
+## Reto 1, continuación: los avisos que aparecieron solo en DEV
+
+El escaneo de ZAP pasó limpio en mi máquina contra Compose, y después puso `deploy-dev` en rojo con **4 avisos** al correr contra el clúster. Mismo código, mismo ZAP, resultado distinto: en DEV el escáner recorrió más rutas y vio respuestas que en local no había visitado.
+
+De los cuatro, **dos eran arreglos reales**:
+
+- **90004, aislamiento contra Spectre**: faltaban `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy` y `Cross-Origin-Embedder-Policy`.
+- **10055, CSP incompleta**: faltaba `form-action 'self'`. Y revisando eso encontré algo peor que había hecho yo: puse `'unsafe-inline'` en `style-src` "por si acaso", y resulta que **el HTML no tiene ni un estilo en línea**, todo viene de `estilos.css`. Estaba debilitando la política para nada. Lo quité.
+
+Los otros dos se aceptan en `.zap/rules.tsv` con su motivo: el contenido estático **debe** poder cachearse (10049), y "ZAP está desactualizado" (10116) habla del escáner, no de la aplicación, y su versión está fija a propósito para que el pipeline sea reproducible.
+
+Resultado final: **0 fallos y 0 avisos**, 63 comprobaciones pasadas y 4 aceptadas a conciencia.
+
+## B6: dónde estaba realmente el tiempo
+
+| | Jobs | Duración |
+|---|---|---|
+| Primer run completo en verde | 10 | **155 s** |
+| Después de optimizar | 10 | **86 s** |
+
+Son **−44 %**, bastante por encima del 25 % que pedía el criterio. Lo que más me sorprendió es de dónde salió la mejora: **casi toda del grafo, no de las cachés**.
+
+- `test-unit` esperaba a `lint` sin ninguna razón: un error de estilo no invalida una prueba, ni una prueba rota se arregla formateando.
+- `package` esperaba a `test-integration`, 35 segundos del camino crítico. Pero **publicar una imagen no es desplegarla**: si la integración falla, la compuerta de DEV lo frena igual, porque `deploy-dev` necesita a las dos. Lo único que se pierde en ese caso es una imagen publicada que nadie usa, y eso es más barato que 35 segundos en cada run.
+
+Las cachés (capas de Docker y base de datos de Trivy) ayudaron, pero el salto grande vino de dejar de hacer cola donde no hacía falta. La pregunta útil no es "¿cómo hago cada paso más rápido?", sino "¿qué está esperando a qué, y por qué?".
