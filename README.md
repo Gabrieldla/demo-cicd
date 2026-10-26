@@ -161,6 +161,68 @@ open http://localhost:30090
 
 El Secret `db-credenciales` se crea **en el clúster**, una sola vez. No está en el repositorio ni lo crea el pipeline de staging. Los pods llevan `imagePullSecrets: ghcr`: si sus paquetes son públicos, ese Secret no hace falta y Kubernetes lo ignora; si son privados, créenlo con un token que tenga `read:packages`.
 
+## Bitácora de decisiones
+
+El relato largo —los ocho hallazgos, lo que se rompió y cómo— está en [BITACORA.md](./BITACORA.md). Aquí va una entrada por cada cosa que decidí, en el formato que pide el enunciado.
+
+### B2: dos herramientas cambiadas
+
+- **Decisión:** TruffleHog 3.99.7 en lugar de Gitleaks para los secretos, y k3d v5.9.0 en lugar de kind para el DEV efímero.
+- **Alternativas que evalué:**
+  - *Gitleaks* (lo de la guía): más rápido y con configuración TOML más simple. Pero solo detecta **patrones**: si una cadena se parece a una llave de AWS la marca, viva o muerta.
+  - *detect-secrets de Yelp*: trabaja con una línea base versionada de secretos conocidos. Cómodo en repositorios con muchos falsos positivos históricos; en uno nuevo es más ceremonia que valor, y obliga a mantener y revisar ese archivo en cada PR.
+  - *kind* (lo de la guía): el estándar de facto en CI, levanta Kubernetes "vanilla".
+  - *minikube*: más pesado y pensado para escritorio, no para un runner.
+- **Por qué elegí estas:** TruffleHog, además del patrón, **verifica contra el emisor** si la credencial sigue viva: separa un secreto explotable de una cadena que solo lo parece, y un escáner que grita mucho acaba desactivado. Y k3d levanta **k3s**, que es exactamente lo que corre mi Rancher Desktop en STAGING: con kind, DEV y STAGING eran dos Kubernetes distintos y lo que pasaba en uno no predecía lo del otro.
+- **Fuentes consultadas:**
+  - [TruffleHog](https://github.com/trufflesecurity/trufflehog) — el flag `--results=verified,unknown`, que es el ajuste que importa
+  - [Gitleaks](https://github.com/gitleaks/gitleaks) y [detect-secrets](https://github.com/Yelp/detect-secrets)
+  - [k3d](https://k3d.io/) y [kind](https://kind.sigs.k8s.io/)
+- **Cómo lo verifiqué:** verde en el [run 40262023942](../../actions/runs/40262023942); rojo en el [run 40260425572](../../actions/runs/40260425572) (TruffleHog frenó una contraseña de Postgres en 23 s) y en el [run 40257194498](../../actions/runs/40257194498) (DEV sobre k3d se levantó y ZAP encontró cuatro avisos dentro, así que no promovió nada).
+- **Qué no me funcionó:** la acción `AbsaOSS/k3d-action@v2.4.0` falla con `curl: (22) 404`: intenta descargar una versión que ya no está publicada. Lo resolví bajando el binario de su release con versión fija, **sin** canalizar un script remoto a bash, porque ejecutar código remoto a ciegas es el patrón exacto del ataque a la cadena de suministro que estudié en el LAB-03. Y le probé a TruffleHog cinco secretos falsos: reportó **uno**. No está roto —el filtro descarta las credenciales que el emisor confirma como muertas—, pero no saberlo habría sido peor que un falso positivo.
+
+### Reto 1: DAST con OWASP ZAP
+
+- **Decisión:** un *baseline scan* de ZAP 2.16.1 contra el DEV que el pipeline levanta dentro del runner, con el informe HTML como artefacto del run.
+- **Alternativas que evalué:**
+  - *Full scan*: hace escaneo activo, es decir ataca de verdad. Encuentra más, pero tarda mucho y deja la aplicación sucia: no cabe en una etapa que debe durar minutos.
+  - *API scan*: apunta a una especificación OpenAPI. La aplicación no publica una, y escribirla solo para esto era desviarse del objetivo.
+  - *Escanear STAGING*: tentador porque es el ambiente persistente, pero significa atacar aquello a lo que ya se promovió algo. DEV nace y muere dentro del job: es el lugar correcto para que una herramienta lo golpee.
+- **Por qué elegí esta:** es la única de las tres que cabe en el tiempo de un pipeline y no toca un ambiente con datos.
+- **Fuentes consultadas:**
+  - [ZAP Baseline Scan](https://www.zaproxy.org/docs/docker/baseline-scan/) — el formato de `rules.tsv` y los códigos de salida
+  - [Content-Security-Policy, en MDN](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy)
+- **Cómo lo verifiqué:** [run 40262023942](../../actions/runs/40262023942), con el artefacto `informe-zap`. Antes de subirlo levanté la aplicación en local y corrí el mismo contenedor: 0 fallos, 0 avisos, 63 comprobaciones pasadas y 6 aceptadas con su motivo escrito en `.zap/rules.tsv`.
+- **Qué no me funcionó:** puse `unsafe-inline` en `style-src` dando por hecho que el HTML traía estilos en línea. No los trae: todo viene de `estilos.css`. Debilité la política para resolver un problema que no existía, y la cabecera seguía pareciendo correcta. Lo descubrí días después, revisando otra alerta. Y el escaneo pasó limpio en local contra Compose y puso `deploy-dev` en rojo con cuatro avisos al correr contra el clúster: ahí el escáner recorrió más rutas.
+
+### Reto 3: Observabilidad en STAGING
+
+- **Decisión:** Prometheus, Alertmanager y Grafana con manifiestos propios en el namespace `observabilidad`, descubriendo los pods por las anotaciones `prometheus.io/*`, con el dashboard RED que ya existía y una alerta de 5xx por encima del 5 % durante un minuto.
+- **Alternativas que evalué:**
+  - *`kube-prometheus-stack` de Helm* (lo que sugiere el enunciado): un comando y traes todo, incluidas métricas del nodo y de Kubernetes. Pero arrastra node-exporter, kube-state-metrics, el operador y sus CRD.
+  - *Prometheus Operator a secas*: menos piezas que el chart completo, pero sigue siendo un operador y un juego de CRD para administrar tres procesos.
+- **Por qué elegí esta:** `kubectl top nodes` me daba **6282Mi de 7.8Gi, el 80 %**, con la aplicación ya corriendo, y el clúster es **k3s v1.25**. Lo que necesito son tres procesos y una regla. El coste lo asumo y lo escribo: no tengo métricas del nodo ni de Kubernetes, solo de la aplicación.
+- **Fuentes consultadas:**
+  - [`kubernetes_sd_config` de Prometheus](https://prometheus.io/docs/prometheus/latest/configuration/configuration/) — el descubrimiento por anotación y los `relabel_configs`
+  - [Unit testing for rules](https://prometheus.io/docs/prometheus/latest/configuration/unit_testing_rules/) — el formato de `promtool test rules`
+  - [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack), para medir lo que estaba descartando
+- **Cómo lo verifiqué:** las pruebas de la regla corren en la **etapa 3** del pipeline, así que cada run es la evidencia. Tres casos: dispara con 17 % de 5xx (con el valor real en la anotación, `16.67%`), **no** dispara a los 30 s por el `for: 1m`, no dispara con un 2 % y no dispara sin tráfico. Y en el clúster, `scripts/provocar-errores.sh` tumba la base de STAGING para verla saltar de verdad.
+- **Qué no me funcionó:** la primera versión de la regla dividía errores entre total y nada más. Sin tráfico eso es `0/0 = NaN`, la comparación no se cumple y **parece que todo va bien**. No lo vi mirando Prometheus: lo vi al escribir el tercer caso de prueba, que era justamente "sin tráfico". Si no hubiera escrito pruebas para una alerta —porque total, es solo una consulta— se habría quedado así.
+
+### Reto 6: La plataforma también es código
+
+- **Decisión:** Terraform con el provider `integrations/github`, administrando el ruleset de `main` y los ambientes `dev` y `staging` con sus revisores. Terraform corre en contenedor con versión fija, sin instalarlo.
+- **Alternativas que evalué:**
+  - *El playbook de Ansible para el runner* (la otra opción del enunciado): deja una máquina lista para ser runner. Útil, pero un runner se reinstala en veinte minutos.
+  - *Dejarlo en la interfaz y documentarlo en el README*: cero herramientas nuevas, pero un documento no detecta que alguien cambió la configuración.
+- **Por qué elegí esta:** la protección de `main` es lo que de verdad no quiero perder: un repositorio sin compuertas se nota cuando ya entró algo. Y hay un motivo concreto: la lista de checks obligatorios y los nombres de los jobs **tienen que coincidir carácter por carácter**, y tenerlos en dos sitios —YAML por un lado, una pantalla de configuración por otro— es la trampa que ya me comí con el check de Dependabot.
+- **Fuentes consultadas:**
+  - [`github_repository_ruleset`](https://registry.terraform.io/providers/integrations/github/latest/docs/resources/repository_ruleset) del provider `integrations/github`
+  - [Opciones de Dependabot](https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference) — el `cooldown`, y qué propiedades valen para cada ecosistema
+  - [Versiones de Node y su soporte](https://nodejs.org/en/about/previous-releases) — para decidir sobre la actualización a Node 25
+- **Cómo lo verifiqué:** `terraform plan` da **`No changes. Your infrastructure matches the configuration.`** Cero cambios significa que el código describe lo que el repositorio tiene, no lo que yo creía que tenía. Detalle en [terraform/README.md](./terraform/README.md).
+- **Qué no me funcionó:** mi primer impulso fue `terraform apply` sobre un estado vacío. Habría intentado **crear** un ruleset que ya existe y dos ambientes que ya existen: en el mejor caso falla, en el peor deja `main` sin protección a mitad de camino. Había que importar. Y antes de eso probé a agregar el check del `dependabot.yml` a los obligatorios de `main`: **bloqueó la rama por completo**, porque ese contexto lo publica Dependabot y no aparece en todos los PR. Lo deshice y lo dejé escrito.
+
 ## Roturas a propósito (B3, y una más para el B2)
 
 Cinco ramas rompen el pipeline una etapa cada vez, para comprobar que cada compuerta frena de verdad y para medir cuánto cuesta enterarse tarde. Las cuatro primeras son las que pide el B3; la quinta la agregué para probar la herramienta nueva del B2. Las ramas y sus PR quedan abiertas a propósito: son la evidencia, no cambios que quiera integrar.
