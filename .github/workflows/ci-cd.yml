@@ -230,6 +230,12 @@ jobs:
           TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         with:
           image-ref: ${{ env.IMAGEN }}:sha-${{ github.sha }}
+          # La version del binario queda escrita, no heredada. La accion trae
+          # v0.70.0 por DEFECTO, asi que hoy ya esta fijada de hecho, pero eso no
+          # se ve leyendo este archivo: habria que ir al action.yaml de la accion
+          # a mirar su default. Y el dia que Dependabot suba la accion, la version
+          # de Trivy cambia sin que ningun diff lo diga.
+          version: v0.70.0
           severity: CRITICAL,HIGH,MEDIUM
           format: json
           output: trivy.json
@@ -256,6 +262,7 @@ jobs:
           TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         with:
           image-ref: ${{ env.IMAGEN }}:sha-${{ github.sha }}
+          version: v0.70.0
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "1"
