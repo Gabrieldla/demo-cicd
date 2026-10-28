@@ -20,6 +20,24 @@
 # por ahora porque el Deployment de la plantilla corre como root y cambiarlo exige
 # además ajustar fsGroup y los permisos del volumen; queda anotado como mejora.
 #
+# ── CVE-2026-56857, la mas clara de todas (28/10/2026) ────────────────────────
+# Tambien es de la stdlib de Go dentro de gosu, pero esta merece su propia nota
+# porque no hace falta razonar sobre el uso: es una vulnerabilidad DE WINDOWS.
+#
+#   "Root.Mkdir(All) can follow junctions out of the root on Windows"
+#
+# Los "junctions" son una funcion del sistema de archivos de Windows. La imagen es
+# postgres:16-alpine, o sea Linux, y el contenedor corre sobre Linux. El codigo
+# afectado no existe en esta plataforma.
+#
+# Es CRITICAL y tiene parche (Go 1.26.9 / 1.27.2), asi que por la regla del curso
+# frena el pipeline, y esta bien que lo haga: la severidad la pone quien publica el
+# CVE, sin saber donde va a correr. Decidir que aqui no aplica es trabajo mio, y
+# por eso queda escrito en vez de bajado de severidad.
+#
+# Se revisa cuando la imagen oficial recompile gosu con un Go parcheado.
+CVE-2026-56857
+
 # Se revisan cuando la imagen oficial actualice gosu. Aceptadas el 25/10/2026.
 CVE-2025-61726
 CVE-2025-61729
