@@ -324,3 +324,22 @@ Y no fue solo un mensaje feo. El script lleva `set -e`, así que **abortó ahí*
 El arreglo es mover los dos archivos a `reglas/`: `kubectl apply -f carpeta/` **no es recursivo**, así que un subdirectorio queda fuera por construcción, sin depender de que nadie se acuerde.
 
 **Qué me llevo:** `kubectl apply -f <carpeta>` no aplica los archivos que yo tenía en la cabeza, aplica los que hay. Mi validación fue correcta el día que la hice y dejó de serlo en cuanto cambié la carpeta, sin que nada me avisara. Es el mismo patrón de los hallazgos 1, 2 y 8 con otra cara: **una comprobación hecha una vez no es una comprobación**, es una foto. Por eso las pruebas de la regla de alerta están en el pipeline y no en mi terminal.
+
+---
+
+## Hallazgo 12: el pipeline se puso en rojo solo, sin que yo tocara nada
+
+Dos días después de darlo por terminado, `main` estaba en rojo. No había cambiado una línea: lo único que pasó fue que Trivy actualizó su base de datos y apareció un CVE que ayer no existía.
+
+```
+stdlib  CVE-2026-56857  CRITICAL  fixed
+  Installed: v1.24.6    Fixed: 1.26.9, 1.27.2
+  Root.Mkdir(All) can follow junctions out of the root on Windows
+usr/local/bin/gosu (gobinary)
+```
+
+Es la misma stdlib de Go dentro de `gosu` que ya me había dado 26 avisos. Pero esta es la más fácil de resolver de todas, y por un motivo que no tiene que ver con el uso: **los *junctions* son una función del sistema de archivos de Windows**. La imagen es `postgres:16-alpine` y el contenedor corre sobre Linux. El código afectado no existe en esta plataforma.
+
+Aun así es CRITICAL y tiene parche, así que frenó el pipeline. Y está bien que lo frenara: **la severidad la pone quien publica el CVE, sin saber dónde va a correr**. Un escáner que intentara adivinar qué CVE aplican a mi plataforma se equivocaría en la dirección peligrosa. Decidir que esta no aplica es trabajo mío, y por eso va al `.trivyignore` con su razón escrita y su fecha, en vez de bajar la severidad o poner `exit-code: 0`.
+
+**Qué me llevo, y es lo que menos esperaba del laboratorio:** un pipeline no es una foto, es algo que sigue corriendo. Este se puso en rojo **sin que nadie tocara el código**, porque el mundo cambió y él se enteró. Eso es exactamente lo que quiero que haga —prefiero enterarme por un run rojo que por un incidente—, pero significa que la etapa de seguridad no es una compuerta que se pasa una vez: es una suscripción. Y las excepciones del `.trivyignore` llevan fecha justamente por esto, porque un día dejan de ser verdad.
