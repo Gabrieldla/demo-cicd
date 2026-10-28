@@ -127,7 +127,7 @@ jobs:
       # promtool le mete series de entrada y afirma qué debe y qué NO debe disparar.
       - name: Pruebas de las reglas de alerta (promtool)
         run: >
-          docker run --rm -v "$PWD/k8s/observabilidad:/r:ro" -w /r
+          docker run --rm -v "$PWD/k8s/observabilidad/reglas:/r:ro" -w /r
           --entrypoint promtool prom/prometheus:v3.15.1
           test rules pruebas-alertas.yml 2>&1 | tee alertas.txt
       - name: Resumen de las pruebas

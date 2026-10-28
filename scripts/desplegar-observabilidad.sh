@@ -13,13 +13,16 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "==> Manifiestos"
+# Solo esta carpeta, que NO es recursiva: los .yml de reglas/ no son manifiestos de
+# Kubernetes y kubectl los rechazaria con "apiVersion not set, kind not set".
+# Por eso viven en un subdirectorio y no sueltos aqui.
 kubectl apply -f k8s/observabilidad/00-namespace.yaml
 kubectl apply -f k8s/observabilidad/
 
-# Las reglas de alerta viven en k8s/observabilidad/api.yml y de ahi salen dos
+# Las reglas viven en k8s/observabilidad/reglas/api.yml y de ahi salen dos
 # cosas: este ConfigMap y las pruebas de promtool. Una sola copia.
-echo "==> Reglas de alerta (desde k8s/observabilidad/api.yml)"
-kubectl -n observabilidad create configmap prometheus-reglas   --from-file=api.yml=k8s/observabilidad/api.yml   --dry-run=client -o yaml | kubectl apply -f -
+echo "==> Reglas de alerta (desde k8s/observabilidad/reglas/api.yml)"
+kubectl -n observabilidad create configmap prometheus-reglas   --from-file=api.yml=k8s/observabilidad/reglas/api.yml   --dry-run=client -o yaml | kubectl apply -f -
 
 # El dashboard se genera a partir del MISMO archivo que usa Compose. Tener dos
 # copias del JSON es garantizar que una se queda vieja.

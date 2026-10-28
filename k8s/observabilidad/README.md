@@ -37,14 +37,14 @@ Añadir una réplica, o desplegar otro servicio con las mismas anotaciones, no o
 
 ## La alerta, y su prueba
 
-`api.yml` tiene una regla: **más del 5 % de respuestas 5xx durante un minuto**.
+`reglas/api.yml` tiene una regla: **más del 5 % de respuestas 5xx durante un minuto**.
 
 Lo que me costó no fue el umbral, fue el caso sin tráfico. La expresión divide los errores entre el total de peticiones, y sin tráfico eso es `0/0 = NaN`: una regla mal escrita se queda callada para siempre, o grita sin motivo, y eso **no se nota mirando una gráfica un rato**. Por eso la condición es explícita: hay peticiones **y** más del 5 % fallan.
 
 Y por eso la regla tiene pruebas, que corren en el pipeline (etapa 3):
 
 ```bash
-docker run --rm -v "$PWD/k8s/observabilidad:/r" -w /r \
+docker run --rm -v "$PWD/k8s/observabilidad/reglas:/r" -w /r \
   --entrypoint promtool prom/prometheus:v3.15.1 \
   test rules pruebas-alertas.yml
 ```
@@ -55,7 +55,7 @@ Tres casos:
 2. 2 % de 5xx → no dispara. No todo error es una incidencia.
 3. Sin tráfico → no dispara.
 
-`api.yml` es la **única** copia de la regla: el ConfigMap que Prometheus monta lo genera el script a partir de este archivo, y las pruebas leen el mismo. Igual que el dashboard, que sale del JSON que ya usaba Compose.
+`reglas/api.yml` es la **única** copia de la regla: el ConfigMap que Prometheus monta lo genera el script a partir de este archivo, y las pruebas leen el mismo. Igual que el dashboard, que sale del JSON que ya usaba Compose.
 
 ## Cómo comprobar que salta de verdad
 
