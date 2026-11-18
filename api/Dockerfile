@@ -4,7 +4,7 @@
 # doce jobs en verde, pero el 25 es linea "current": deja de recibir parches
 # mucho antes. Que las pruebas pasen dice que el codigo es compatible, no que la
 # version sea una buena base para servir algo.
-FROM node:24-alpine
+FROM node:26-alpine
 
 # Parchea los paquetes del sistema de la imagen base antes de instalar nada.
 # Se hace aquí, como root, porque más abajo el contenedor baja al uid 1000.
